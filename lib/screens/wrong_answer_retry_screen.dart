@@ -71,22 +71,27 @@ class _WrongAnswerRetryScreenState
               const SizedBox(height: 20),
 
               // 객관식 보기 표시
-              ...options.map((option) {
-                final optionText = option.toString();
+              RadioGroup<String>(
+                groupValue: selectedAnswer,
+                onChanged: (value) {
+                  if (isAnswered) return;
 
-                return RadioListTile<String>(
-                  title: Text(optionText),
-                  value: optionText,
-                  groupValue: selectedAnswer,
-                  onChanged: isAnswered
-                      ? null
-                      : (value) {
-                          setState(() {
-                            selectedAnswer = value;
-                          });
-                        },
-                );
-              }),
+                  setState(() {
+                    selectedAnswer = value;
+                  });
+                },
+                child: Column(
+                  children: options.map<Widget>((option) {
+                    final optionText = option.toString();
+
+                    return RadioListTile<String>(
+                      title: Text(optionText),
+                      value: optionText,
+                      enabled: !isAnswered,
+                    );
+                  }).toList(),
+                ),
+              ),
 
               const SizedBox(height: 24),
 

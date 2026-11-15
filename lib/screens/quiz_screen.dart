@@ -244,26 +244,32 @@ class _QuizScreenState extends State<QuizScreen> {
               const SizedBox(height: 28),
 
               if (isMultipleChoice)
-                ...options.map(
-                  (option) => Card(
-                    color: selectedAnswer == option
-                        ? const Color(0xFFF1EEFF)
-                        : null,
-                    child: RadioListTile<String>(
-                      title: Text(option),
-                      value: option,
-                      groupValue: selectedAnswer,
-                      activeColor: const Color(0xFF9185E8),
-                      onChanged: isAnswered
-                          ? null
-                          : (value) {
-                              setState(() {
-                                selectedAnswer = value;
-                              });
-                            },
-                    ),
+                RadioGroup<String>(
+                  groupValue: selectedAnswer,
+                  onChanged: (value) {
+                    if (isAnswered) return;
+
+                    setState(() {
+                      selectedAnswer = value;
+                    });
+                  },
+                  child: Column(
+                    children: options.map<Widget>((option) {
+                      return Card(
+                        color: selectedAnswer == option
+                            ? const Color(0xFFF1EEFF)
+                            : null,
+                        child: RadioListTile<String>(
+                          title: Text(option),
+                          value: option,
+                          enabled: !isAnswered,
+                          activeColor: const Color(0xFF9185E8),
+                        ),
+                      );
+                    }).toList(),
                   ),
                 )
+
               else
                 TextField(
                   controller: answerController,

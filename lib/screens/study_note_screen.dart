@@ -29,7 +29,7 @@ class _StudyNoteScreenState extends State<StudyNoteScreen> {
   List<dynamic> quizQuestions = [];
   bool isSaving = false;
   bool isSaved = false;
-  @override
+
   
     Future<void> generateQuiz() async {
     if (isGeneratingQuiz) return;
@@ -158,7 +158,7 @@ await Navigator.push(
       }
     }
 
-
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(

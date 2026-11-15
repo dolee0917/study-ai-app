@@ -6,7 +6,6 @@ import 'screens/study_home_screen.dart';
 import 'screens/study_note_screen.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'screens/login_screen.dart';
@@ -118,7 +117,7 @@ class _PdfUploadPageState extends State<PdfUploadPage> {
         allowedExtensions: ['pdf'],
       );
       if (!mounted) return;
-      if (result == null || result.isEmpty) return;
+      if (result.isEmpty) return;
       final file = result.first;
       setState(() {
         selectedFileName = file.name;
