@@ -11,6 +11,9 @@ class StudyNoteScreen extends StatefulWidget {
   final String summaryText;
   final String originalText;
   final bool isFromHistory;
+  // 선택한 과목 및 학기 정보
+  final String? subjectId;
+  final String? semesterCode;
 
   const StudyNoteScreen({
     super.key,
@@ -18,7 +21,10 @@ class StudyNoteScreen extends StatefulWidget {
     required this.summaryText,
     required this.originalText,
     this.isFromHistory = false,
+    this.subjectId,
+    this.semesterCode,
   });
+
 
   @override
   State<StudyNoteScreen> createState() => _StudyNoteScreenState();
@@ -88,15 +94,19 @@ if (generatedQuestions.isEmpty) {
   throw const FormatException('생성된 복습 문제가 없습니다.');
 }
 
+
 await Navigator.push(
   context,
   MaterialPageRoute(
     builder: (context) => QuizScreen(
       questions: generatedQuestions,
       fileName: widget.fileName,
+      subjectId: widget.subjectId,
+      semesterCode: widget.semesterCode,
     ),
   ),
 );
+
     } catch (e) {
         if (!mounted) return;
 
@@ -128,6 +138,8 @@ await Navigator.push(
           summaryText: widget.summaryText,
           originalText: widget.originalText,
           questions: quizQuestions,
+          subjectId: widget.subjectId,
+          semesterCode: widget.semesterCode,
         );
 
         if (!mounted) return;

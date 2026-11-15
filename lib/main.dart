@@ -108,6 +108,35 @@ class _PdfUploadPageState extends State<PdfUploadPage> {
   bool isSummarizing = false;
   bool isTextExpanded = false;
 
+    // 현재 선택한 학기와 과목 정보
+  int selectedYear = DateTime.now().year;
+  String selectedSemester =
+      DateTime.now().month <= 6 ? '1학기' : '2학기';
+
+  String? selectedSubjectId;
+  String? selectedSubjectName;
+
+  // Firestore 학기 문서 ID (예: 2026-2)
+  String get selectedSemesterCode =>
+      '$selectedYear-${selectedSemester == '1학기' ? '1' : '2'}';
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> get subjectsStream {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      return const Stream.empty();
+    }
+
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('semesters')
+        .doc(selectedSemesterCode)
+        .collection('subjects')
+        .snapshots();
+  }
+
+
   Future<void> pickPdfFile() async {
     if (isPickingFile) return;
     setState(() => isPickingFile = true);
@@ -198,6 +227,8 @@ class _PdfUploadPageState extends State<PdfUploadPage> {
               fileName: selectedFileName ?? '강의자료',
               summaryText: generatedSummary,
               originalText: extractedText,
+              subjectId: selectedSubjectId,
+              semesterCode: selectedSemesterCode,
             ),
           ),
         );
@@ -235,11 +266,145 @@ class _PdfUploadPageState extends State<PdfUploadPage> {
             const Text('강의자료 PDF를 업로드하세요', textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: isPickingFile ? null : pickPdfFile,
-              icon: const Icon(Icons.upload_file),
-              label: Text(isPickingFile ? 'PDF 처리 중...' : 'PDF 파일 선택'),
+            
+            // 학년도 및 학기 선택
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    key: ValueKey('year-$selectedYear'),
+                    initialValue: selectedYear,
+                    decoration: const InputDecoration(
+                      labelText: '학년도',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: List.generate(
+                      11,
+                      (index) => DateTime.now().year - 5 + index,
+                    ).map((year) {
+                      return DropdownMenuItem<int>(
+                        value: year,
+                        child: Text('$year년'),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value == null) return;
+
+                      setState(() {
+                        selectedYear = value;
+                        selectedSubjectId = null;
+                        selectedSubjectName = null;
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('semester-$selectedSemester'),
+                    initialValue: selectedSemester,
+                    decoration: const InputDecoration(
+                      labelText: '학기',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: ['1학기', '2학기'].map((semester) {
+                      return DropdownMenuItem<String>(
+                        value: semester,
+                        child: Text(semester),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value == null) return;
+
+                      setState(() {
+                        selectedSemester = value;
+                        selectedSubjectId = null;
+                        selectedSubjectName = null;
+                      });
+                    },
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 16),
+
+            // 과목 선택
+            StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: subjectsStream,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const Text(
+                    '과목 목록을 불러오지 못했습니다.',
+                  );
+                }
+
+                if (!snapshot.hasData) {
+                  return const Center(
+                    child: CircularProgressIndicator(),
+                  );
+                }
+
+                final subjects = snapshot.data!.docs;
+
+                if (subjects.isEmpty) {
+                  return const Text(
+                    '현재 학기에 등록된 과목이 없습니다. '
+                    '수강 과목 관리에서 먼저 과목을 등록해주세요.',
+                  );
+                }
+
+                final currentSubjectId = subjects.any(
+                  (subject) => subject.id == selectedSubjectId,
+                )
+                    ? selectedSubjectId
+                    : null;
+
+                return DropdownButtonFormField<String>(
+                  key: ValueKey(
+                    '$selectedSemesterCode-$currentSubjectId',
+                  ),
+                  initialValue: currentSubjectId,
+                  decoration: const InputDecoration(
+                    labelText: '수강 과목 선택',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.menu_book),
+                  ),
+                  hint: const Text('PDF를 저장할 과목을 선택하세요'),
+                  items: subjects.map((subject) {
+                    final subjectName =
+                        subject.data()['name'] as String? ?? '이름 없음';
+
+                    return DropdownMenuItem<String>(
+                      value: subject.id,
+                      child: Text(subjectName),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    final selected = subjects.firstWhere(
+                      (subject) => subject.id == value,
+                    );
+
+                    setState(() {
+                      selectedSubjectId = value;
+                      selectedSubjectName =
+                          selected.data()['name'] as String?;
+                    });
+                  },
+                );
+              },
+            ),
+            const SizedBox(height: 24),
+            
+            ElevatedButton.icon(
+              onPressed: isPickingFile || selectedSubjectId == null
+                  ? null
+                  : pickPdfFile,
+              icon: const Icon(Icons.upload_file),
+              label: Text(
+                isPickingFile ? 'PDF 처리 중...' : 'PDF 파일 선택',
+              ),
+            ),
+
             const SizedBox(height: 24),
             if (selectedFileName != null) ...[
               Text('선택한 파일: $selectedFileName',

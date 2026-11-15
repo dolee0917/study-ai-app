@@ -27,6 +27,8 @@ class StudyStorage {
     required String summaryText,
     required String originalText,
     List<dynamic> questions = const [],
+    String? subjectId,
+    String? semesterCode,
   }) async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -38,6 +40,8 @@ class StudyStorage {
       'summaryText': summaryText,
       'originalText': originalText,
       'questions': questions,
+      'subjectId': subjectId,
+      'semesterCode': semesterCode,
       'createdAt': DateTime.now().toIso8601String(),
     };
 
@@ -58,6 +62,8 @@ class StudyStorage {
     required String fileName,
     required List<Map<String, dynamic>> answers,
     required int correctCount,
+    String? subjectId,
+    String? semesterCode,
   }) async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -77,6 +83,8 @@ class StudyStorage {
       'answers': answers,
       'correctCount': correctCount,
       'totalQuestions': answers.length,
+      'subjectId': subjectId,
+      'semesterCode': semesterCode,
       'createdAt': DateTime.now().toIso8601String(),
     };
 

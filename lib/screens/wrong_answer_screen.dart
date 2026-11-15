@@ -2,8 +2,17 @@ import 'package:flutter/material.dart';
 import '../services/study_storage.dart';
 import 'wrong_answer_retry_screen.dart';
 
+
 class WrongAnswerScreen extends StatefulWidget {
-  const WrongAnswerScreen({super.key});
+  final String? subjectId;
+  final String? semesterCode;
+
+  const WrongAnswerScreen({
+    super.key,
+    this.subjectId,
+    this.semesterCode,
+  });
+
 
   @override
   State<WrongAnswerScreen> createState() =>
@@ -12,6 +21,29 @@ class WrongAnswerScreen extends StatefulWidget {
 
 class _WrongAnswerScreenState extends State<WrongAnswerScreen> {
   late Future<List<Map<String, dynamic>>> wrongAnswersFuture;
+
+    String formatStudyDateTime(dynamic value) {
+    if (value == null || value.toString().isEmpty) {
+      return '날짜 정보 없음';
+    }
+
+    final dateTime = DateTime.tryParse(value.toString());
+
+    if (dateTime == null) {
+      return '날짜 정보 없음';
+    }
+
+    final localTime = dateTime.toLocal();
+
+    String twoDigits(int number) =>
+        number.toString().padLeft(2, '0');
+
+    return '${localTime.year}.'
+        '${twoDigits(localTime.month)}.'
+        '${twoDigits(localTime.day)} '
+        '${twoDigits(localTime.hour)}:'
+        '${twoDigits(localTime.minute)}';
+  }
 
   @override
   void initState() {
@@ -26,7 +58,19 @@ class _WrongAnswerScreenState extends State<WrongAnswerScreen> {
     final List<Map<String, dynamic>> wrongAnswers = [];
 
     for (final result in results) {
+      // 과목과 학기가 전달된 경우 해당 기록만 조회
+      if (widget.subjectId != null &&
+          result['subjectId'] != widget.subjectId) {
+        continue;
+      }
+
+      if (widget.semesterCode != null &&
+          result['semesterCode'] != widget.semesterCode) {
+        continue;
+      }
+
       final answers = result['answers'] as List<dynamic>? ?? [];
+
 
       for (final item in answers) {
         final answer = Map<String, dynamic>.from(item as Map);
@@ -167,7 +211,27 @@ class _WrongAnswerScreenState extends State<WrongAnswerScreen> {
                             color: Colors.grey,
                           ),
                         ),
-                        
+
+                        const SizedBox(height: 6),
+
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.access_time,
+                              size: 14,
+                              color: Colors.grey,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '풀이 일시: ${formatStudyDateTime(answer['createdAt'])}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                                                
                         const SizedBox(height: 16),
 
                         // 객관식 보기가 저장된 문제만 다시 풀기 가능

@@ -5,11 +5,16 @@ import '../services/study_storage.dart';
 class QuizScreen extends StatefulWidget {
   final List<dynamic> questions;
   final String fileName;
+  // 과목 및 학기 정보
+  final String? subjectId;
+  final String? semesterCode;
 
   const QuizScreen({
     super.key,
     required this.questions,
     required this.fileName,
+    this.subjectId,
+    this.semesterCode,
   });
 
   @override
@@ -41,6 +46,7 @@ class _QuizScreenState extends State<QuizScreen> {
     required bool? isCorrect,
     required String explanation,
     required dynamic options,
+    required String type,
   }) {
     answerHistory.add({
       'question': question,
@@ -49,6 +55,7 @@ class _QuizScreenState extends State<QuizScreen> {
       'isCorrect': isCorrect,
       'explanation': explanation,
       'options': options,
+      'type': type,
     });
   }
   
@@ -95,6 +102,7 @@ class _QuizScreenState extends State<QuizScreen> {
       isCorrect: answerIsCorrect,
       explanation: question['explanation']?.toString() ?? '',
       options: question['options'],
+      type: question['type']?.toString() ?? 'short_answer',
     );
   }
 
@@ -119,6 +127,8 @@ class _QuizScreenState extends State<QuizScreen> {
       fileName: widget.fileName,
       answers: answerHistory,
       correctCount: correctCount,
+      subjectId: widget.subjectId,
+      semesterCode: widget.semesterCode,
     );
   }
   
