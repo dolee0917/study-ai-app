@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/study_storage.dart';
 
 class WrongAnswerRetryScreen extends StatefulWidget {
   final Map<String, dynamic> question;
@@ -19,17 +20,41 @@ class _WrongAnswerRetryScreenState
   bool isAnswered = false;
   bool isCorrect = false;
 
-  void checkAnswer() {
+  
+  Future<void> checkAnswer() async {
     if (selectedAnswer == null || isAnswered) return;
 
     final correctAnswer =
         widget.question['correctAnswer'].toString().trim();
 
+    final result = selectedAnswer!.trim() == correctAnswer;
+
     setState(() {
       isAnswered = true;
-      isCorrect = selectedAnswer!.trim() == correctAnswer;
+      isCorrect = result;
     });
+
+    try {
+      await StudyStorage.saveRetryResult(
+        question: widget.question['question']?.toString() ?? '',
+        userAnswer: selectedAnswer!,
+        correctAnswer: correctAnswer,
+        isCorrect: result,
+        subjectId: widget.question['subjectId']?.toString(),
+        semesterCode: widget.question['semesterCode']?.toString(),
+        fileName: widget.question['fileName']?.toString(),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('재풀이 결과를 저장하지 못했습니다.'),
+        ),
+      );
+    }
   }
+
 
   @override
   Widget build(BuildContext context) {

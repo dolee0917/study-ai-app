@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/study_storage.dart';
 import 'wrong_answer_retry_screen.dart';
+import 'dart:convert';
 
 
 class WrongAnswerScreen extends StatefulWidget {
@@ -81,13 +82,57 @@ class _WrongAnswerScreenState extends State<WrongAnswerScreen> {
             ...answer,
             'fileName': result['fileName'] ?? '복습문제',
             'createdAt': result['createdAt'] ?? '',
+            'subjectId': result['subjectId'],
+            'semesterCode': result['semesterCode'],
           });
         }
       }
     }
 
-    return wrongAnswers;
+    
+    // 연속 2회 정답한 문제는 오답노트에서 제외
+    final List<Map<String, dynamic>> activeWrongAnswers = [];
+
+    for (final answer in wrongAnswers) {
+      final consecutiveCorrect =
+          await StudyStorage.getConsecutiveCorrectCount(
+        question: answer['question']?.toString() ?? '',
+        subjectId: answer['subjectId']?.toString(),
+        semesterCode: answer['semesterCode']?.toString(),
+        fileName: answer['fileName']?.toString(),
+      );
+
+      if (consecutiveCorrect < 2) {
+        activeWrongAnswers.add({
+          ...answer,
+          'consecutiveCorrect': consecutiveCorrect,
+        });
+      }
+    }
+
+    
+    // 동일한 문제의 중복 표시 방지
+    final Map<String, Map<String, dynamic>> uniqueWrongAnswers = {};
+
+    for (final answer in activeWrongAnswers) {
+      final questionKey = jsonEncode([
+        answer['semesterCode'],
+        answer['subjectId'],
+        answer['fileName'],
+        answer['question'],
+      ]);
+
+      // 동일 문제는 가장 최근 기록만 유지
+      uniqueWrongAnswers.putIfAbsent(
+        questionKey,
+        () => answer,
+      );
+    }
+
+    return uniqueWrongAnswers.values.toList();
+
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -239,17 +284,24 @@ class _WrongAnswerScreenState extends State<WrongAnswerScreen> {
                             (answer['options'] as List).isNotEmpty)
                         SizedBox(
                             width: double.infinity,
-                            child: OutlinedButton.icon(
-                            onPressed: () {
-                                Navigator.push(
-                                context,
-                                MaterialPageRoute(
+                            child: OutlinedButton.icon(                            
+                              onPressed: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
                                     builder: (_) => WrongAnswerRetryScreen(
-                                    question: answer,
+                                      question: answer,
                                     ),
-                                ),
+                                  ),
                                 );
-                            },
+
+                                if (!mounted) return;
+
+                                setState(() {
+                                  wrongAnswersFuture = loadWrongAnswers();
+                                });
+                              },
+
                             icon: const Icon(Icons.refresh),
                             label: const Text('다시 풀기'),
                             ),
