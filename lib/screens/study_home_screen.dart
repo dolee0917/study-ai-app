@@ -4,6 +4,7 @@ import 'study_history_screen.dart';
 import 'wrong_answer_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'subject_management_screen.dart';
+import 'study_analysis_screen.dart';
 
 
 const _lavender = Color(0xFF8576D8);
@@ -56,7 +57,13 @@ class _StudyHomeScreenState extends State<StudyHomeScreen> {
       ),
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Study AI', style: TextStyle(fontWeight: FontWeight.w800, color: _ink)),
+          title: const Text(
+            'Study AI',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: _ink,
+            ),
+          ),
           elevation: 0,
         ),
         body: _tab == 0
@@ -252,7 +259,49 @@ class _StudyHomeScreenState extends State<StudyHomeScreen> {
               );
             },
           ),
-        ), 
+        
+        ),
+        const SizedBox(height: 12),
+
+        Card(
+          color: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 18,
+              vertical: 10,
+            ),
+            leading: const Icon(
+              Icons.bar_chart_rounded,
+              color: _lavender,
+              size: 30,
+            ),
+            title: const Text(
+              '학습 성취도 분석',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: _ink,
+              ),
+            ),
+            subtitle: const Text(
+              '정답률과 취약 문제를 확인해요',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      const StudyAnalysisScreen(),
+                ),
+              );
+            },
+          ),
+        ),
+
         const SizedBox(height: 26),
         const Text('최근 학습 자료', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: _ink)),
         const SizedBox(height: 12),
