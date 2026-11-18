@@ -16,6 +16,7 @@ class _StudyAnalysisScreenState extends State<StudyAnalysisScreen> {
   late Future<Map<String, dynamic>> _statsFuture;
   late Future<List<Map<String, dynamic>>> _subjectsFuture;
   late Future<List<Map<String, dynamic>>> _questionsFuture;
+  late Future<Map<String, dynamic>> _resolutionFuture;
   final _names = <String, Future<String>>{};
 
   @override
@@ -29,9 +30,11 @@ class _StudyAnalysisScreenState extends State<StudyAnalysisScreen> {
       StudyStorage.getMultipleChoiceStats(),
       StudyStorage.getSubjectAccuracyStats(),
       StudyStorage.getQuestionAnalysis(),
+      StudyStorage.getWeakQuestionResolutionStats(),
     ]);
     _subjectsFuture = Future.value(data[1] as List<Map<String, dynamic>>);
     _questionsFuture = Future.value(data[2] as List<Map<String, dynamic>>);
+    _resolutionFuture = Future.value(data[3] as Map<String, dynamic>);
     return data[0] as Map<String, dynamic>;
   }
 
@@ -141,6 +144,60 @@ class _StudyAnalysisScreenState extends State<StudyAnalysisScreen> {
                     ],
                   ),
                 ),
+              ),
+              const SizedBox(height: 28),
+              FutureBuilder<Map<String, dynamic>>(
+                future: _resolutionFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return const Text('취약 문제 해소율을 불러오지 못했습니다.');
+                  }
+
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final data = snapshot.data!;
+                  final total = data['totalWeakCount'] as int;
+                  final resolved = data['resolvedCount'] as int;
+                  final remaining = data['remainingWeakCount'] as int;
+                  final rate = data['resolutionRate'] as double;
+
+                  return Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '취약 문제 해소율',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            '${rate.toStringAsFixed(1)}%',
+                            style: const TextStyle(
+                              fontSize: 30,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          LinearProgressIndicator(
+                            value: rate / 100,
+                            minHeight: 8,
+                          ),
+                          const SizedBox(height: 16),
+                          Text('취약 판정 이력: $total문제'),
+                          Text('해제된 문제: $resolved문제'),
+                          Text('남은 취약 문제: $remaining문제'),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 28),
               const Text(

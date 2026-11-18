@@ -130,6 +130,8 @@ void main() {
   testWidgets('분석 카드에 정답률과 해제 상태를 표시', (tester) async {
     await StudyStorage.saveQuizResult(
       fileName: '자료.pdf',
+      subjectId: 'math',
+      semesterCode: '2026',
       answers: [
         {
           'question': '화면 테스트 문제',
@@ -146,6 +148,8 @@ void main() {
         correctAnswer: 'A',
         isCorrect: true,
         fileName: '자료.pdf',
+        subjectId: 'math',
+        semesterCode: '2026',
       );
     }
     await tester.pumpWidget(const MaterialApp(home: StudyAnalysisScreen()));

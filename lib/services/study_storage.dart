@@ -183,7 +183,16 @@ class StudyStorage {
       // 기존 재풀이는 객관식만 지원하며 type을 저장하지 않았다.
       for (final r in retries)
         {...r, 'type': r['type'] ?? 'multiple_choice', 'isRetry': true},
-    ].where((a) => a['type'] == 'multiple_choice').toList();
+        ].where((a) {
+      final subjectId = a['subjectId']?.toString().trim();
+      final semesterCode = a['semesterCode']?.toString().trim();
+
+      return a['type'] == 'multiple_choice' &&
+          subjectId != null &&
+          subjectId.isNotEmpty &&
+          semesterCode != null &&
+          semesterCode.isNotEmpty;
+    }).toList();
   }
 
   static Map<String, dynamic> _stats(List<Map<String, dynamic>> data) {
@@ -280,6 +289,34 @@ class StudyStorage {
         'status': status,
       };
     }).toList();
+  }
+
+    // 취약 문제 해소율 계산
+  static Future<Map<String, dynamic>> getWeakQuestionResolutionStats() async {
+    final questions = await getQuestionAnalysis();
+
+    // 한 번이라도 오답이 발생한 고유 문제
+    final weakQuestions = questions
+        .where((q) => (q['wrongCount'] as int) > 0)
+        .toList();
+
+    // 현재 취약 상태가 해제된 문제
+    final resolvedCount = weakQuestions
+        .where((q) => q['status'] == '해제')
+        .length;
+
+    final totalWeakCount = weakQuestions.length;
+
+    final resolutionRate = totalWeakCount == 0
+        ? 0.0
+        : resolvedCount / totalWeakCount * 100;
+
+    return {
+      'totalWeakCount': totalWeakCount,
+      'resolvedCount': resolvedCount,
+      'remainingWeakCount': totalWeakCount - resolvedCount,
+      'resolutionRate': resolutionRate,
+    };
   }
 
   static Future<Map<String, dynamic>> _find({
