@@ -3,10 +3,16 @@ import '../services/study_storage.dart';
 
 class WrongAnswerRetryScreen extends StatefulWidget {
   final Map<String, dynamic> question;
+  final int? currentNumber;
+  final int? totalCount;
+  final VoidCallback? onCompleted;
 
   const WrongAnswerRetryScreen({
     super.key,
     required this.question,
+    this.currentNumber,
+    this.totalCount,
+    this.onCompleted,
   });
 
   @override
@@ -19,10 +25,11 @@ class _WrongAnswerRetryScreenState
   String? selectedAnswer;
   bool isAnswered = false;
   bool isCorrect = false;
+  bool isSaving = false;
 
   
   Future<void> checkAnswer() async {
-    if (selectedAnswer == null || isAnswered) return;
+    if (selectedAnswer == null || isAnswered || isSaving) return;
 
     final correctAnswer =
         widget.question['correctAnswer'].toString().trim();
@@ -30,8 +37,7 @@ class _WrongAnswerRetryScreenState
     final result = selectedAnswer!.trim() == correctAnswer;
 
     setState(() {
-      isAnswered = true;
-      isCorrect = result;
+      isSaving = true;
     });
 
     try {
@@ -44,6 +50,11 @@ class _WrongAnswerRetryScreenState
         semesterCode: widget.question['semesterCode']?.toString(),
         fileName: widget.question['fileName']?.toString(),
       );
+      if (!mounted) return;
+      setState(() {
+        isAnswered = true;
+        isCorrect = result;
+      });
     } catch (e) {
       if (!mounted) return;
 
@@ -52,6 +63,8 @@ class _WrongAnswerRetryScreenState
           content: Text('재풀이 결과를 저장하지 못했습니다.'),
         ),
       );
+    } finally {
+      if (mounted) setState(() => isSaving = false);
     }
   }
 
@@ -63,7 +76,9 @@ class _WrongAnswerRetryScreenState
     final options =
         question['options'] as List<dynamic>? ?? [];
 
-    return Scaffold(
+    return PopScope(
+      canPop: !isSaving,
+      child: Scaffold(
       appBar: AppBar(
         title: const Text('오답 다시 풀기'),
         centerTitle: true,
@@ -85,6 +100,11 @@ class _WrongAnswerRetryScreenState
 
               const SizedBox(height: 24),
 
+              if (widget.currentNumber != null && widget.totalCount != null) ...[
+                Text('${widget.currentNumber} / ${widget.totalCount}'),
+                const SizedBox(height: 16),
+              ],
+
               Text(
                 question['question']?.toString() ?? '',
                 style: const TextStyle(
@@ -99,7 +119,7 @@ class _WrongAnswerRetryScreenState
               RadioGroup<String>(
                 groupValue: selectedAnswer,
                 onChanged: (value) {
-                  if (isAnswered) return;
+                  if (isAnswered || isSaving) return;
 
                   setState(() {
                     selectedAnswer = value;
@@ -112,7 +132,7 @@ class _WrongAnswerRetryScreenState
                     return RadioListTile<String>(
                       title: Text(optionText),
                       value: optionText,
-                      enabled: !isAnswered,
+                      enabled: !isAnswered && !isSaving,
                     );
                   }).toList(),
                 ),
@@ -123,8 +143,8 @@ class _WrongAnswerRetryScreenState
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: isAnswered ? null : checkAnswer,
-                  child: const Text('정답 확인하기'),
+                  onPressed: isAnswered || isSaving ? null : checkAnswer,
+                  child: Text(isSaving ? '저장 중...' : '정답 확인하기'),
                 ),
               ),
 
@@ -190,15 +210,22 @@ class _WrongAnswerRetryScreenState
                   width: double.infinity,
                   child: OutlinedButton(
                     onPressed: () {
-                      Navigator.pop(context);
+                      if (widget.onCompleted != null) {
+                        widget.onCompleted!();
+                      } else {
+                        Navigator.pop(context);
+                      }
                     },
-                    child: const Text('오답 노트로 돌아가기'),
+                    child: Text(widget.onCompleted == null
+                        ? '오답 노트로 돌아가기'
+                        : widget.currentNumber == widget.totalCount ? '복습 완료' : '다음 문제'),
                   ),
                 ),
               ],
             ],
           ),
         ),
+      ),
       ),
     );
   }
