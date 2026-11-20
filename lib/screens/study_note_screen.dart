@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'dart:convert';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'quiz_screen.dart';
 import '../services/study_storage.dart';
@@ -35,14 +36,37 @@ class _StudyNoteScreenState extends State<StudyNoteScreen> {
   List<dynamic> quizQuestions = [];
   bool isSaving = false;
   bool isSaved = false;
+  late String? _noteId = widget.isFromHistory
+      ? null
+      : '${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
+
+  Future<String> _saveNote(List<dynamic> questions) async {
+    final id = _noteId ?? await StudyStorage.findExistingNoteId(
+      fileName: widget.fileName,
+      summaryText: widget.summaryText,
+      originalText: widget.originalText,
+      subjectId: widget.subjectId,
+      semesterCode: widget.semesterCode,
+    );
+    final savedId = await StudyStorage.saveNote(
+      noteId: id,
+      fileName: widget.fileName,
+      summaryText: widget.summaryText,
+      originalText: widget.originalText,
+      questions: questions,
+      subjectId: widget.subjectId,
+      semesterCode: widget.semesterCode,
+    );
+    _noteId = savedId;
+    return savedId;
+  }
 
   
     Future<void> generateQuiz() async {
-    if (isGeneratingQuiz) return;
+    if (isGeneratingQuiz || isSaving) return;
 
     setState(() {
         isGeneratingQuiz = true;
-        quizQuestions = [];
     });
 
     try {
@@ -82,18 +106,26 @@ class _StudyNoteScreenState extends State<StudyNoteScreen> {
         throw const FormatException('문제 데이터 형식이 올바르지 않습니다.');
         }
 
-        if (!mounted) return;
-
         final generatedQuestions = data['questions'] as List<dynamic>;
-
-setState(() {
-  quizQuestions = generatedQuestions;
-});
 
 if (generatedQuestions.isEmpty) {
   throw const FormatException('생성된 복습 문제가 없습니다.');
 }
+if (generatedQuestions.any((item) =>
+    item is! Map || item['type'] is! String ||
+    item['question'] is! String || (item['question'] as String).trim().isEmpty ||
+    item['answer'] is! String || (item['answer'] as String).trim().isEmpty ||
+    (item['type'] == 'multiple_choice' &&
+        (item['options'] is! List || (item['options'] as List).isEmpty)))) {
+  throw const FormatException('문제 데이터 형식이 올바르지 않습니다.');
+}
 
+await _saveNote(generatedQuestions);
+if (!mounted) return;
+setState(() {
+  quizQuestions = generatedQuestions;
+  isSaved = true;
+});
 
 await Navigator.push(
   context,
@@ -126,21 +158,14 @@ await Navigator.push(
 
     
     Future<void> saveStudyNote() async {
-      if (isSaving || isSaved) return;
+      if (isSaving || isSaved || isGeneratingQuiz) return;
 
       setState(() {
         isSaving = true;
       });
 
       try {
-        await StudyStorage.saveNote(
-          fileName: widget.fileName,
-          summaryText: widget.summaryText,
-          originalText: widget.originalText,
-          questions: quizQuestions,
-          subjectId: widget.subjectId,
-          semesterCode: widget.semesterCode,
-        );
+        await _saveNote(quizQuestions);
 
         if (!mounted) return;
 
@@ -270,7 +295,7 @@ await Navigator.push(
             
             if (!widget.isFromHistory) ...[
               ElevatedButton.icon(
-                onPressed: (isSaving || isSaved) ? null : saveStudyNote,
+                onPressed: (isSaving || isSaved || isGeneratingQuiz) ? null : saveStudyNote,
                 icon: Icon(
                   isSaved ? Icons.check_circle : Icons.save_outlined,
                 ),
@@ -290,7 +315,7 @@ await Navigator.push(
 
             // 향후 복습 문제 기능 연결 예정
             ElevatedButton.icon(
-                onPressed: isGeneratingQuiz ? null : generateQuiz,
+                onPressed: (isGeneratingQuiz || isSaving) ? null : generateQuiz,
                 icon: const Icon(Icons.quiz_outlined),
                 label: Text(
                     isGeneratingQuiz

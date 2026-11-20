@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -8,6 +9,7 @@ class StudyStorage {
       FirebaseAuth.instance.currentUser?.uid;
 
   static const String _storageKey = 'study_notes';
+  static Future<void> _noteWrites = Future.value();
 
   // 저장된 학습 노트 목록 불러오기
   static Future<List<Map<String, dynamic>>> loadNotes() async {
@@ -26,36 +28,81 @@ class StudyStorage {
   }
 
   // 새로운 학습 노트 저장하기
-  static Future<void> saveNote({
+  static Future<String> saveNote({
     required String fileName,
     required String summaryText,
     required String originalText,
     List<dynamic> questions = const [],
     String? subjectId,
     String? semesterCode,
+    String? noteId,
   }) async {
+    final previous = _noteWrites;
+    final completed = Completer<void>();
+    _noteWrites = completed.future;
+    await previous;
+    try {
     final prefs = await SharedPreferences.getInstance();
 
     final notes = await loadNotes();
 
+    final id = noteId ?? DateTime.now().microsecondsSinceEpoch.toString();
+    final index = notes.indexWhere((note) => note['id'] == id);
+    if (index != -1 &&
+        (notes[index]['fileName'] != fileName ||
+            notes[index]['semesterCode'] != semesterCode ||
+            notes[index]['subjectId'] != subjectId ||
+            notes[index]['originalText'] != originalText ||
+            notes[index]['summaryText'] != summaryText)) {
+      throw StateError('학습 노트 식별 정보가 일치하지 않습니다.');
+    }
     final newNote = {
-      'id': DateTime.now().microsecondsSinceEpoch.toString(),
+      if (index != -1) ...notes[index],
+      'id': id,
       'fileName': fileName,
       'summaryText': summaryText,
       'originalText': originalText,
       'questions': questions,
       'subjectId': subjectId,
       'semesterCode': semesterCode,
-      'createdAt': DateTime.now().toIso8601String(),
+      'createdAt': index == -1
+          ? DateTime.now().toIso8601String()
+          : notes[index]['createdAt'],
     };
 
-    notes.insert(0, newNote);
+    if (index == -1) {
+      notes.insert(0, newNote);
+    } else {
+      notes[index] = newNote;
+    }
 
     final success = await prefs.setString(_storageKey, jsonEncode(notes));
 
     if (!success) {
       throw Exception('학습 노트를 저장하지 못했습니다.');
     }
+    return id;
+    } finally {
+      completed.complete();
+    }
+  }
+
+  static Future<String> findExistingNoteId({
+    required String fileName,
+    required String summaryText,
+    required String originalText,
+    String? subjectId,
+    String? semesterCode,
+  }) async {
+    final matches = (await loadNotes()).where((note) =>
+        note['fileName'] == fileName && note['summaryText'] == summaryText &&
+        note['originalText'] == originalText && note['subjectId'] == subjectId &&
+        note['semesterCode'] == semesterCode).toList();
+    if (matches.length != 1 || matches.single['id'] is! String ||
+        (matches.single['id'] as String).isEmpty) {
+      throw StateError('기존 학습 노트를 정확히 구분할 수 없습니다.');
+    }
+    return matches.single['id'] as String;
   }
   
 
@@ -318,6 +365,147 @@ class StudyStorage {
       'resolutionRate': resolutionRate,
     };
   }
+
+  static Future<Map<String, dynamic>> getSubjectWeakQuestionStats({
+    required String semesterCode,
+    required String subjectId,
+  }) async {
+    final questions = await getQuestionAnalysis();
+    final weakQuestions = questions.where(
+      (question) =>
+          question['semesterCode'] == semesterCode &&
+          question['subjectId'] == subjectId &&
+          (question['wrongCount'] as int) > 0,
+    );
+    final totalWeakCount = weakQuestions.length;
+    final resolvedCount =
+        weakQuestions.where((question) => question['status'] == '해제').length;
+
+    return {
+      'totalWeakCount': totalWeakCount,
+      'resolvedCount': resolvedCount,
+      'remainingWeakCount': totalWeakCount - resolvedCount,
+      'resolutionRate': totalWeakCount == 0
+          ? 0.0
+          : resolvedCount / totalWeakCount * 100,
+    };
+  }
+
+  static Future<List<Map<String, dynamic>>> getRecommendedReviewQuestions({
+    required String semesterCode,
+    required String subjectId,
+    required int limit,
+  }) => _getRecommendedReviewQuestions(
+    semesterCode: semesterCode, subjectId: subjectId, limit: limit,
+  );
+
+  static Future<int> getRecommendedReviewQuestionCount({
+    required String semesterCode,
+    required String subjectId,
+  }) async => (await _getRecommendedReviewQuestions(
+    semesterCode: semesterCode, subjectId: subjectId,
+  )).length;
+
+  static Future<List<Map<String, dynamic>>> _getRecommendedReviewQuestions({
+    required String semesterCode,
+    required String subjectId,
+    int? limit,
+  }) async {
+    if (limit != null && limit <= 0) return [];
+    final notes = await loadNotes();
+    final candidates = <String, Map<String, dynamic>>{};
+    final historyOwners = <String, Set<int>>{};
+    for (var index = 0; index < notes.length; index++) {
+      final note = notes[index];
+      final fileName = note['fileName'];
+      final questions = note['questions'];
+      if (note['semesterCode'] != semesterCode || note['subjectId'] != subjectId ||
+          fileName is! String || fileName.trim().isEmpty || questions is! List) {
+        continue;
+      }
+      for (final item in questions) {
+        if (item is! Map || item['type'] != 'multiple_choice') continue;
+        final question = item['question'];
+        if (question is! String || question.trim().isEmpty) continue;
+        final historyKey = _key({'semesterCode': semesterCode, 'subjectId': subjectId,
+          'fileName': fileName, 'question': question});
+        historyOwners.putIfAbsent(historyKey, () => <int>{}).add(index);
+        final options = item['options'];
+        final answer = item['answer'];
+        final correct = answer is String && answer.trim().isNotEmpty
+            ? answer
+            : item['correctAnswer'];
+        if (options is! List || options.isEmpty ||
+            options.any((option) => option is! String || option.trim().isEmpty) ||
+            correct is! String || correct.trim().isEmpty ||
+            !options.any((option) => (option as String).trim() == correct.trim())) {
+          continue;
+        }
+        final noteKey = jsonEncode([note['id'], index, historyKey]);
+        candidates.putIfAbsent(noteKey, () => {
+          'question': question,
+          'options': List<dynamic>.from(options),
+          'correctAnswer': correct,
+          'explanation': item['explanation'] is String ? item['explanation'] : '',
+          'fileName': fileName,
+          'semesterCode': semesterCode,
+          'subjectId': subjectId,
+          if (note['id'] is String) 'noteId': note['id'],
+        });
+      }
+    }
+
+    final histories = <String, Map<String, dynamic>>{
+      for (final item in await getQuestionAnalysis()) _key(item): item,
+    };
+    final ranked = candidates.entries.toList();
+    Map<String, dynamic>? history(Map<String, dynamic> candidate) {
+      final key = _key(candidate);
+      // 기존 풀이 기록에는 노트 ID가 없으므로 하나의 노트에만 연결될 때 사용한다.
+      return historyOwners[key]?.length == 1 ? histories[key] : null;
+    }
+    int priority(Map<String, dynamic>? item) {
+      if (item == null) return 0;
+      if (item['status'] == '해제') return 3;
+      if ((item['wrongCount'] as int) > 0) return 1;
+      return 2;
+    }
+    ranked.sort((a, b) {
+      final ah = history(a.value);
+      final bh = history(b.value);
+      final order = priority(ah).compareTo(priority(bh));
+      if (order != 0) return order;
+      final wrong = ((bh?['wrongCount'] as int?) ?? 0)
+          .compareTo((ah?['wrongCount'] as int?) ?? 0);
+      if (wrong != 0) return wrong;
+      final streak = ((ah?['consecutiveCorrect'] as int?) ?? 0)
+          .compareTo((bh?['consecutiveCorrect'] as int?) ?? 0);
+      return streak != 0 ? streak : a.key.compareTo(b.key);
+    });
+    final selected = limit == null ? ranked : ranked.take(limit);
+    return selected.map((entry) => entry.value).toList();
+  }
+
+  static int calculateTodayReviewCount({
+    required int remainingWeakCount,
+    required int daysUntilExam,
+  }) {
+    if (remainingWeakCount <= 0 || daysUntilExam < 0) return 0;
+
+    final count = daysUntilExam <= 1
+        ? remainingWeakCount
+        : remainingWeakCount ~/ daysUntilExam +
+            (remainingWeakCount % daysUntilExam == 0 ? 0 : 1);
+    return count > 10 ? 10 : count;
+  }
+
+  static int calculateTodayRecommendedCount({
+    required int availableQuestionCount,
+    required int daysUntilExam,
+  }) => calculateTodayReviewCount(
+    remainingWeakCount: availableQuestionCount,
+    daysUntilExam: daysUntilExam,
+  );
 
   static Future<Map<String, dynamic>> _find({
     required String question,

@@ -5,7 +5,7 @@ import 'wrong_answer_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'subject_management_screen.dart';
 import 'study_analysis_screen.dart';
-
+import 'exam_management_screen.dart';
 
 const _lavender = Color(0xFF8576D8);
 const _ink = Color(0xFF242B50);
@@ -32,15 +32,6 @@ class _StudyHomeScreenState extends State<StudyHomeScreen> {
     '꾸준한 공부가 실력이 됩니다.',
   ];
   late final String _message = _messages[_random.nextInt(_messages.length)];
-
-  void _openPage(String title) {
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => Scaffold(
-        appBar: AppBar(title: Text(title)),
-        body: const SizedBox.expand(),
-      ),
-    ));
-  }
 
   void _openUpload() {
     Navigator.of(context).push(MaterialPageRoute<void>(
@@ -218,7 +209,20 @@ class _StudyHomeScreenState extends State<StudyHomeScreen> {
                 ),
               );
             },),
-            _feature('시험 공부 대비하기', '시험을 준비해요', Icons.fact_check_outlined, const Color(0xFFE6F7F3), () => _openPage('시험 공부 대비하기')),
+            _feature(
+              '시험 공부 대비하기',
+              '시험을 준비해요',
+              Icons.fact_check_outlined,
+              const Color(0xFFE6F7F3),
+              () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ExamManagementScreen(),
+                  ),
+                );
+              },
+            ),
           ],
         ),
         const SizedBox(height: 16),
