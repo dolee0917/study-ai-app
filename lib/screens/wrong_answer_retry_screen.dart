@@ -6,6 +6,8 @@ class WrongAnswerRetryScreen extends StatefulWidget {
   final int? currentNumber;
   final int? totalCount;
   final VoidCallback? onCompleted;
+  final ValueChanged<bool>? onAnswerSaved;
+  final bool isRecommendedReview;
 
   const WrongAnswerRetryScreen({
     super.key,
@@ -13,6 +15,8 @@ class WrongAnswerRetryScreen extends StatefulWidget {
     this.currentNumber,
     this.totalCount,
     this.onCompleted,
+    this.onAnswerSaved,
+    this.isRecommendedReview = false,
   });
 
   @override
@@ -46,6 +50,9 @@ class _WrongAnswerRetryScreenState
         userAnswer: selectedAnswer!,
         correctAnswer: correctAnswer,
         isCorrect: result,
+        reviewType: widget.isRecommendedReview
+            ? 'recommended_review'
+            : 'wrong_answer_retry',
         subjectId: widget.question['subjectId']?.toString(),
         semesterCode: widget.question['semesterCode']?.toString(),
         fileName: widget.question['fileName']?.toString(),
@@ -55,6 +62,7 @@ class _WrongAnswerRetryScreenState
         isAnswered = true;
         isCorrect = result;
       });
+      widget.onAnswerSaved?.call(result);
     } catch (e) {
       if (!mounted) return;
 
@@ -80,7 +88,7 @@ class _WrongAnswerRetryScreenState
       canPop: !isSaving,
       child: Scaffold(
       appBar: AppBar(
-        title: const Text('오답 다시 풀기'),
+        title: Text(widget.isRecommendedReview ? '오늘의 추천 복습' : '오답 다시 풀기'),
         centerTitle: true,
       ),
       body: SafeArea(
@@ -89,9 +97,11 @@ class _WrongAnswerRetryScreenState
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                '다시 도전해보세요!',
-                style: TextStyle(
+              Text(
+                widget.isRecommendedReview
+                    ? '오늘의 추천 문제를 풀어보세요!'
+                    : '다시 도전해보세요!',
+                style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                   color: Color(0xFF6F63B5),

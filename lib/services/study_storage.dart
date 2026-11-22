@@ -162,6 +162,7 @@ class StudyStorage {
     String? subjectId,
     String? semesterCode,
     String? fileName,
+    String reviewType = 'wrong_answer_retry',
   }) async {
     final uid = currentUserId();
     if (uid == null) throw StateError('로그인이 필요합니다.');
@@ -182,6 +183,7 @@ class StudyStorage {
       'userAnswer': userAnswer,
       'correctAnswer': correctAnswer,
       'isCorrect': isCorrect,
+      'reviewType': reviewType,
       'subjectId': subjectId,
       'semesterCode': semesterCode,
       'fileName': fileName,
@@ -229,7 +231,8 @@ class StudyStorage {
           {...q, ...Map<String, dynamic>.from(a as Map), 'isRetry': false},
       // 기존 재풀이는 객관식만 지원하며 type을 저장하지 않았다.
       for (final r in retries)
-        {...r, 'type': r['type'] ?? 'multiple_choice', 'isRetry': true},
+        {...r, 'reviewType': r['reviewType'] ?? 'wrong_answer_retry',
+          'type': r['type'] ?? 'multiple_choice', 'isRetry': true},
         ].where((a) {
       final subjectId = a['subjectId']?.toString().trim();
       final semesterCode = a['semesterCode']?.toString().trim();

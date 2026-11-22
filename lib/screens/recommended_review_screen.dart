@@ -22,6 +22,8 @@ class RecommendedReviewScreen extends StatefulWidget {
 class _RecommendedReviewScreenState extends State<RecommendedReviewScreen> {
   late final Future<List<Map<String, dynamic>>> _questions;
   int _index = 0;
+  final Map<int, bool> _results = {};
+  bool _completed = false;
 
   @override
   void initState() {
@@ -54,14 +56,56 @@ class _RecommendedReviewScreenState extends State<RecommendedReviewScreen> {
             body: const Center(child: Text('복습 가능한 추천 문제가 없습니다.')),
           );
         }
+        if (_completed) {
+          final correct = _results.values.where((result) => result).length;
+          final total = _results.length;
+          final accuracy = correct / total * 100;
+          return Scaffold(
+            appBar: AppBar(title: const Text('오늘의 추천 복습 완료!')),
+            body: SafeArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('총 문제 수: $total개', style: const TextStyle(fontSize: 20)),
+                      const SizedBox(height: 12),
+                      Text('정답 수: $correct개', style: const TextStyle(fontSize: 20)),
+                      const SizedBox(height: 12),
+                      Text('오답 수: ${total - correct}개', style: const TextStyle(fontSize: 20)),
+                      const SizedBox(height: 12),
+                      Text(
+                        '정답률: ${accuracy.toStringAsFixed(1)}%',
+                        style: const TextStyle(
+                          fontSize: 24, fontWeight: FontWeight.bold,
+                          color: Color(0xFF6F63B5),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('돌아가기'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+        final currentIndex = _index;
         return WrongAnswerRetryScreen(
           key: ValueKey(_index),
           question: questions[_index],
+          isRecommendedReview: true,
           currentNumber: _index + 1,
           totalCount: questions.length,
+          onAnswerSaved: (result) => _results.putIfAbsent(currentIndex, () => result),
           onCompleted: () {
+            if (_completed || _index != currentIndex || !_results.containsKey(currentIndex)) return;
             if (_index + 1 == questions.length) {
-              Navigator.pop(context);
+              setState(() => _completed = true);
             } else {
               setState(() => _index++);
             }
