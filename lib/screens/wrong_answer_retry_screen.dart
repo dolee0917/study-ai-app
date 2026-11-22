@@ -83,6 +83,8 @@ class _WrongAnswerRetryScreenState
 
     final options =
         question['options'] as List<dynamic>? ?? [];
+    final currentNumber = widget.currentNumber ?? 1;
+    final totalCount = widget.totalCount ?? 1;
 
     return PopScope(
       canPop: !isSaving,
@@ -110,10 +112,19 @@ class _WrongAnswerRetryScreenState
 
               const SizedBox(height: 24),
 
-              if (widget.currentNumber != null && widget.totalCount != null) ...[
-                Text('${widget.currentNumber} / ${widget.totalCount}'),
-                const SizedBox(height: 16),
-              ],
+              Text('$currentNumber / $totalCount'),
+              const SizedBox(height: 12),
+              LinearProgressIndicator(
+                value: totalCount > 0
+                    ? ((currentNumber - 1 + (isAnswered ? 1 : 0)) / totalCount)
+                        .clamp(0.0, 1.0)
+                    : 0.0,
+                color: const Color(0xFF9185E8),
+                backgroundColor: const Color(0xFFEAE6FA),
+                minHeight: 8,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              const SizedBox(height: 16),
 
               Text(
                 question['question']?.toString() ?? '',

@@ -85,6 +85,8 @@ void main() {
     expect(find.text('오늘의 추천 복습 완료!'), findsNothing);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('quiz_retry_results'), isNull);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
     StudyStorage.currentUserId = () => 'test-user';
     await tester.tap(find.text('정답 확인하기'));
     await tester.pumpAndSettle();

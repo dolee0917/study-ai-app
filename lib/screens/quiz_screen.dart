@@ -222,7 +222,7 @@ class _QuizScreenState extends State<QuizScreen> {
               const SizedBox(height: 12),
 
               LinearProgressIndicator(
-                value: (currentIndex + 1) /
+                value: (currentIndex + (isAnswered ? 1 : 0)) /
                     widget.questions.length,
                 color: const Color(0xFF9185E8),
                 backgroundColor: const Color(0xFFEAE6FA),
