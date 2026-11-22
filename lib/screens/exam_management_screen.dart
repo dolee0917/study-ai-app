@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../services/study_storage.dart';
 import 'recommended_review_screen.dart';
+import 'exam_date_utils.dart';
 
 class ExamManagementScreen extends StatefulWidget {
   const ExamManagementScreen({super.key});
@@ -11,6 +12,63 @@ class ExamManagementScreen extends StatefulWidget {
   @override
   State<ExamManagementScreen> createState() =>
       _ExamManagementScreenState();
+}
+
+class ExamDeleteButton extends StatefulWidget {
+  const ExamDeleteButton({super.key, required this.title, required this.delete});
+
+  final String title;
+  final Future<void> Function() delete;
+
+  @override
+  State<ExamDeleteButton> createState() => _ExamDeleteButtonState();
+}
+
+class _ExamDeleteButtonState extends State<ExamDeleteButton> {
+  bool _busy = false;
+
+  Future<void> _confirmDelete() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('시험 일정 삭제'),
+          content: Text('“${widget.title}” 일정을 삭제하시겠습니까?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('삭제'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      await widget.delete();
+      if (messenger.mounted) {
+        messenger.showSnackBar(const SnackBar(content: Text('시험 일정이 삭제되었습니다.')));
+      }
+    } catch (_) {
+      if (messenger.mounted) {
+        messenger.showSnackBar(const SnackBar(content: Text('시험 일정을 삭제하지 못했습니다.')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: '시험 일정 삭제',
+    onPressed: _busy ? null : _confirmDelete,
+    icon: const Icon(Icons.delete_outline),
+  );
 }
 
 class ExamReviewSummary extends StatefulWidget {
@@ -194,19 +252,11 @@ class _ExamManagementScreenState extends State<ExamManagementScreen> {
   }
 
   int? _daysUntilExam(DateTime? examDate) {
-    if (examDate == null) return null;
-
-    final today = DateTime.now();
-    final todayDate = DateTime.utc(today.year, today.month, today.day);
-    final examDay = DateTime.utc(examDate.year, examDate.month, examDate.day);
-    return examDay.difference(todayDate).inDays;
+    return daysUntilExam(examDate);
   }
 
   String? _dDayText(int? days) {
-    if (days == null) return null;
-    if (days < 0) return '시험 종료';
-    if (days == 0) return 'D-Day';
-    return 'D-$days';
+    return examDDayText(days);
   }
 
   Future<void> _showAddExamDialog() async {
@@ -638,9 +688,10 @@ class _ExamManagementScreenState extends State<ExamManagementScreen> {
                                 color: _ink,
                                 ),
                             ),
-                            trailing: dDayText == null
-                                ? null
-                                : Container(
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (dDayText != null) Container(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 12,
                                       vertical: 8,
@@ -657,6 +708,18 @@ class _ExamManagementScreenState extends State<ExamManagementScreen> {
                                       ),
                                     ),
                                   ),
+                                ExamDeleteButton(
+                                  key: ValueKey('${user.uid}/${exam.id}'),
+                                  title: title,
+                                  delete: () async {
+                                    if (FirebaseAuth.instance.currentUser?.uid != user.uid) {
+                                      throw StateError('User has changed');
+                                    }
+                                    await exam.reference.delete();
+                                  },
+                                ),
+                              ],
+                            ),
                             subtitle: Padding(
                                 padding: const EdgeInsets.only(top: 6),
                                 child: Column(

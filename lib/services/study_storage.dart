@@ -222,6 +222,38 @@ class StudyStorage {
     a['question'],
   ]);
 
+  // 이력에는 노트 ID가 없으므로 같은 이력 키의 보기·정답이 다르면 구분할 수 없다.
+  static Future<Map<String, Set<String>>> _candidateVariants() async {
+    final variants = <String, Set<String>>{};
+    for (final note in await loadNotes()) {
+      final questions = note['questions'];
+      if (questions is! List || note['fileName'] is! String ||
+          (note['fileName'] as String).trim().isEmpty) {
+        continue;
+      }
+      for (final item in questions) {
+        if (item is! Map || item['type'] != 'multiple_choice') continue;
+        final question = item['question'];
+        final options = item['options'];
+        final answer = item['answer'];
+        final correct = answer is String && answer.trim().isNotEmpty
+            ? answer : item['correctAnswer'];
+        if (question is! String || question.trim().isEmpty ||
+            options is! List || options.isEmpty ||
+            options.any((option) => option is! String || option.trim().isEmpty) ||
+            correct is! String || correct.trim().isEmpty ||
+            !options.any((option) => (option as String).trim() == correct.trim())) {
+          continue;
+        }
+        final key = _key({'semesterCode': note['semesterCode'],
+          'subjectId': note['subjectId'], 'fileName': note['fileName'],
+          'question': question});
+        variants.putIfAbsent(key, () => <String>{}).add(jsonEncode([options, correct]));
+      }
+    }
+    return variants;
+  }
+
   static Future<List<Map<String, dynamic>>> _attempts() async {
     final quizzes = await loadQuizResults();
     final retries = await _owned('quiz_retry_results');
@@ -301,29 +333,60 @@ class StudyStorage {
 
   static Future<List<Map<String, dynamic>>> getQuestionAnalysis() async {
     final groups = <String, List<Map<String, dynamic>>>{};
+    final variants = await _candidateVariants();
     for (final a in await _attempts()) {
-      groups.putIfAbsent(_key(a), () => []).add(a);
+      final file = a['fileName'];
+      final question = a['question'];
+      if (file is! String || file.trim().isEmpty ||
+          question is! String || question.trim().isEmpty) {
+        continue;
+      }
+      final key = _key(a);
+      if ((variants[key]?.length ?? 0) > 1) continue;
+      groups.putIfAbsent(key, () => []).add(a);
     }
-    return groups.values.map((g) {
+    return groups.entries.where((entry) {
+      final g = entry.value;
+      final answers = g.map((a) => a['correctAnswer'])
+          .whereType<String>().where((s) => s.trim().isNotEmpty).toSet();
+      final options = g.map((a) => a['options']).whereType<List>()
+          .map(jsonEncode).toSet();
+      final candidateVariants = variants[entry.key];
+      if (candidateVariants != null && candidateVariants.length == 1) {
+        final candidate = jsonDecode(candidateVariants.single) as List;
+        answers.add(candidate[1] as String);
+        options.add(jsonEncode(candidate[0]));
+      }
+      return answers.length <= 1 && options.length <= 1;
+    }).map((entry) {
+      final g = entry.value;
       final wrong = g.where((a) => a['isCorrect'] == false).length;
-      final retries = g.where((a) => a['isRetry'] == true).toList();
-      final sorted = retries.asMap().entries.toList()
+      final sorted = g.asMap().entries.toList()
         ..sort((a, b) {
-          final order =
-              (DateTime.tryParse(b.value['createdAt']?.toString() ?? '') ??
-                      DateTime(1970))
-                  .compareTo(
-                    DateTime.tryParse(a.value['createdAt']?.toString() ?? '') ??
-                        DateTime(1970),
-                  );
-          return order != 0 ? order : a.key.compareTo(b.key);
+          final at = DateTime.tryParse(a.value['createdAt']?.toString() ?? '');
+          final bt = DateTime.tryParse(b.value['createdAt']?.toString() ?? '');
+          if (at == null && bt != null) return -1;
+          if (at != null && bt == null) return 1;
+          final order = at == null ? 0 : at.compareTo(bt!);
+          if (order != 0) return order;
+          final source = (a.value['isRetry'] == true ? 1 : 0)
+              .compareTo(b.value['isRetry'] == true ? 1 : 0);
+          if (source != 0) return source;
+          final idOrder = (a.value['id']?.toString() ?? '')
+              .compareTo(b.value['id']?.toString() ?? '');
+          return idOrder != 0 ? idOrder : b.key.compareTo(a.key);
         });
       var streak = 0;
+      var hasWrong = false;
       for (final a in sorted) {
-        if (a.value['isCorrect'] != true) break;
-        streak++;
+        if (a.value['isCorrect'] == false) {
+          hasWrong = true;
+          streak = 0;
+        } else if (a.value['isCorrect'] == true && hasWrong) {
+          streak++;
+        }
       }
-      final status = streak >= 2
+      final status = hasWrong && streak >= 2
           ? '해제'
           : wrong > 0 && streak == 1
           ? '개선 중'
@@ -417,7 +480,8 @@ class StudyStorage {
     if (limit != null && limit <= 0) return [];
     final notes = await loadNotes();
     final candidates = <String, Map<String, dynamic>>{};
-    final historyOwners = <String, Set<int>>{};
+    final historyOwners = <String, Set<String>>{};
+    final origins = <String, String>{};
     for (var index = 0; index < notes.length; index++) {
       final note = notes[index];
       final fileName = note['fileName'];
@@ -432,7 +496,6 @@ class StudyStorage {
         if (question is! String || question.trim().isEmpty) continue;
         final historyKey = _key({'semesterCode': semesterCode, 'subjectId': subjectId,
           'fileName': fileName, 'question': question});
-        historyOwners.putIfAbsent(historyKey, () => <int>{}).add(index);
         final options = item['options'];
         final answer = item['answer'];
         final correct = answer is String && answer.trim().isNotEmpty
@@ -444,8 +507,12 @@ class StudyStorage {
             !options.any((option) => (option as String).trim() == correct.trim())) {
           continue;
         }
-        final noteKey = jsonEncode([note['id'], index, historyKey]);
-        candidates.putIfAbsent(noteKey, () => {
+        final noteKey = jsonEncode([historyKey, options, correct]);
+        historyOwners.putIfAbsent(historyKey, () => <String>{}).add(noteKey);
+        final origin = jsonEncode([note['id']?.toString() ?? '', index]);
+        if (!origins.containsKey(noteKey) || origin.compareTo(origins[noteKey]!) < 0) {
+          origins[noteKey] = origin;
+          candidates[noteKey] = {
           'question': question,
           'options': List<dynamic>.from(options),
           'correctAnswer': correct,
@@ -454,7 +521,8 @@ class StudyStorage {
           'semesterCode': semesterCode,
           'subjectId': subjectId,
           if (note['id'] is String) 'noteId': note['id'],
-        });
+          };
+        }
       }
     }
 
@@ -464,7 +532,7 @@ class StudyStorage {
     final ranked = candidates.entries.toList();
     Map<String, dynamic>? history(Map<String, dynamic> candidate) {
       final key = _key(candidate);
-      // 기존 풀이 기록에는 노트 ID가 없으므로 하나의 노트에만 연결될 때 사용한다.
+      // 같은 이력 키에 서로 다른 후보가 있으면 이력을 임의 연결하지 않는다.
       return historyOwners[key]?.length == 1 ? histories[key] : null;
     }
     int priority(Map<String, dynamic>? item) {
@@ -522,10 +590,11 @@ class StudyStorage {
       'semesterCode': semesterCode,
       'fileName': fileName,
     });
-    return (await getQuestionAnalysis()).firstWhere(
-      (a) => _key(a) == key,
-      orElse: () => {'wrongCount': 0, 'consecutiveCorrect': 0, 'status': '정상'},
-    );
+    final matches = (await getQuestionAnalysis()).where((a) => _key(a) == key);
+    if (matches.isNotEmpty) return matches.first;
+    final hasUnclassified = (await _attempts()).any((a) => _key(a) == key);
+    return {'wrongCount': 0, 'consecutiveCorrect': 0,
+      'status': hasUnclassified ? '판정 보류' : '정상'};
   }
 
   static Future<int> getQuestionWrongCount({

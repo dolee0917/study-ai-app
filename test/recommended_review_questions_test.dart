@@ -79,14 +79,38 @@ void main() {
     expect((notes.first['questions'] as List).first, source);
   });
 
-  test('동일 파일과 문구가 다른 노트에 있으면 이력을 임의 연결하지 않는다', () async {
+  test('서로 다른 노트의 동일 후보는 중복 제거하고 이력을 유지한다', () async {
     await seed([note('first', [question('same')]), note('second', [question('same')]),
       note('third', [question('single')], file: 'other.pdf')]);
     await attempt('same', false);
     await attempt('single', false, file: 'other.pdf');
     final result = await recommend();
-    expect(result.map((q) => q['question']), ['same', 'same', 'single']);
-    expect(result.take(2).map((q) => q['noteId']).toSet(), {'first', 'second'});
+    expect(result.map((q) => q['question']).toSet(), {'same', 'single'});
+    expect(result.length, 2);
+    expect(result.firstWhere((q) => q['question'] == 'same')['noteId'], 'first');
+  });
+
+  test('보기 순서나 정답, 파일이 다르면 후보를 유지하고 모호한 이력은 연결하지 않는다', () async {
+    final differentOrder = {...question('same'), 'options': ['B', 'A']};
+    final differentAnswer = {...question('same'), 'answer': 'B'};
+    await seed([
+      note('a', [question('same')]),
+      note('b', [question('same')]),
+      note('c', [differentOrder]),
+      note('d', [differentAnswer]),
+      note('e', [question('same')], file: 'other.pdf'),
+      note('f', [question('different')]),
+    ]);
+    await attempt('same', false);
+    final result = await recommend();
+    expect(result.length, 5);
+    expect(result.where((q) => q['question'] == 'same').length, 4);
+    expect(result.where((q) => q['fileName'] == 'other.pdf').length, 1);
+    expect(await StudyStorage.getQuestionLearningStatus(
+      question: 'same', subjectId: 'math', semesterCode: '2026-1', fileName: 'book.pdf'),
+      '판정 보류');
+    expect((await StudyStorage.getSubjectWeakQuestionStats(
+      semesterCode: '2026-1', subjectId: 'math'))['totalWeakCount'], 0);
   });
 
   test('동일 우선순위는 오답 횟수, 연속 정답 횟수와 식별 키 순으로 정렬한다', () async {

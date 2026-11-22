@@ -97,6 +97,80 @@ void main() {
     expect(questions.where((q) => q['wrongCount'] == 2).length, 1);
   });
 
+  test('일반 퀴즈와 재풀이를 시간순으로 통합하고 일반 퀴즈 재오답을 반영한다', () async {
+    final prefs = await SharedPreferences.getInstance();
+    Map<String, dynamic> quizRecord(String id, String date, bool correct) => {
+      'id': id, 'userId': 'alice', 'fileName': 'book.pdf',
+      'semesterCode': '2026', 'subjectId': 'math', 'createdAt': date,
+      'answers': [{'question': 'Q', 'type': 'multiple_choice', 'isCorrect': correct}],
+    };
+    Map<String, dynamic> retryRecord(String id, String date, bool correct) => {
+      'id': id, 'userId': 'alice', 'fileName': 'book.pdf',
+      'semesterCode': '2026', 'subjectId': 'math', 'createdAt': date,
+      'question': 'Q', 'isCorrect': correct,
+    };
+    await prefs.setString('quiz_results', jsonEncode([
+      quizRecord('q2', '2026-01-03T00:00:00Z', true),
+      quizRecord('q1', '2026-01-01T00:00:00Z', false),
+    ]));
+    await prefs.setString('quiz_retry_results', jsonEncode([
+      retryRecord('r1', '2026-01-02T00:00:00Z', true),
+    ]));
+    expect(await status(), '해제');
+    var stats = await StudyStorage.getSubjectWeakQuestionStats(
+      semesterCode: '2026', subjectId: 'math');
+    expect(stats['resolvedCount'], 1);
+    expect(stats['resolutionRate'], 100.0);
+    await prefs.setString('quiz_results', jsonEncode([
+      quizRecord('q3', '2026-01-04T00:00:00Z', false),
+      quizRecord('q2', '2026-01-03T00:00:00Z', true),
+      quizRecord('q1', '2026-01-01T00:00:00Z', false),
+    ]));
+    expect(await status(), '취약');
+    final item = (await StudyStorage.getQuestionAnalysis()).single;
+    expect(item['consecutiveCorrect'], 0);
+    stats = await StudyStorage.getSubjectWeakQuestionStats(
+      semesterCode: '2026', subjectId: 'math');
+    expect(stats['remainingWeakCount'], 1);
+    expect(stats['resolutionRate'], 0.0);
+  });
+
+  test('오답 없는 정답은 취약에 등록하지 않고 이후 재풀이 오답은 초기화한다', () async {
+    await quiz(correct: true);
+    await quiz(correct: true);
+    expect(await status(), '정상');
+    expect((await StudyStorage.getSubjectWeakQuestionStats(
+      semesterCode: '2026', subjectId: 'math'))['totalWeakCount'], 0);
+    await retry(false);
+    final item = (await StudyStorage.getQuestionAnalysis()).single;
+    expect(item['consecutiveCorrect'], 0);
+    expect(item['status'], '복습 필요');
+  });
+
+  test('누락·잘못된 날짜와 동일 시각을 결정적으로 처리하며 원본을 보존한다', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final quizzes = [{
+      'userId': 'alice', 'id': 'q', 'fileName': 'book.pdf',
+      'semesterCode': '2026', 'subjectId': 'math', 'createdAt': 'invalid',
+      'answers': [{'question': 'Q', 'type': 'multiple_choice', 'isCorrect': false}],
+    }];
+    final retries = [
+      {'userId': 'alice', 'id': 'r1', 'fileName': 'book.pdf',
+        'semesterCode': '2026', 'subjectId': 'math', 'question': 'Q',
+        'isCorrect': true, 'createdAt': '2026-01-01T00:00:00Z'},
+      {'userId': 'alice', 'id': 'r2', 'fileName': 'book.pdf',
+        'semesterCode': '2026', 'subjectId': 'math', 'question': 'Q',
+        'isCorrect': true, 'createdAt': '2026-01-01T00:00:00Z'},
+    ];
+    final rawQuizzes = jsonEncode(quizzes);
+    final rawRetries = jsonEncode(retries);
+    await prefs.setString('quiz_results', rawQuizzes);
+    await prefs.setString('quiz_retry_results', rawRetries);
+    expect(await status(), '해제');
+    expect(prefs.getString('quiz_results'), rawQuizzes);
+    expect(prefs.getString('quiz_retry_results'), rawRetries);
+  });
+
   test('다른 계정과 소유자 없는 기존 기록 제외 및 원본 보존', () async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
