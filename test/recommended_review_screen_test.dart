@@ -123,6 +123,31 @@ void main() {
     expect(find.text('복습 가능한 추천 문제가 없습니다.'), findsOneWidget);
   });
 
+  testWidgets('사전 조회한 맞춤 문제를 사용하고 풀이 결과로 취약 상태를 해제한다', (tester) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('study_notes', jsonEncode([{
+      'id': 'note', 'fileName': 'book.pdf', 'semesterCode': '2026-1', 'subjectId': 'math',
+      'questions': [{'type': 'multiple_choice', 'question': 'Q', 'options': ['A', 'B'],
+        'answer': 'A', 'difficulty': 'easy'}],
+    }]));
+    await StudyStorage.saveRetryResult(question: 'Q', userAnswer: 'B', correctAnswer: 'A',
+      isCorrect: false, fileName: 'book.pdf', semesterCode: '2026-1', subjectId: 'math');
+    await StudyStorage.saveRetryResult(question: 'Q', userAnswer: 'A', correctAnswer: 'A',
+      isCorrect: true, fileName: 'book.pdf', semesterCode: '2026-1', subjectId: 'math');
+    final questions = await StudyStorage.getRecommendedReviewQuestions(
+      semesterCode: '2026-1', subjectId: 'math', difficulty: 'easy', limit: 1);
+    await prefs.setString('study_notes', '[]');
+    await tester.pumpWidget(MaterialApp(home: RecommendedReviewScreen(
+      semesterCode: '2026-1', subjectId: 'math', count: 1, questions: questions)));
+    await tester.pumpAndSettle();
+    expect(find.text('Q'), findsOneWidget);
+    await answer(tester, true, last: true);
+    expect(await StudyStorage.getQuestionLearningStatus(question: 'Q', fileName: 'book.pdf',
+      semesterCode: '2026-1', subjectId: 'math'), '해제');
+    final results = jsonDecode(prefs.getString('quiz_retry_results')!) as List;
+    expect(results.first['reviewType'], 'recommended_review');
+  });
+
   testWidgets('오답 재풀이는 기존 제목과 안내를 표시한다', (tester) async {
     await tester.pumpWidget(const MaterialApp(
       home: WrongAnswerRetryScreen(question: {

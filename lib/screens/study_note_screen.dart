@@ -106,7 +106,11 @@ class _StudyNoteScreenState extends State<StudyNoteScreen> {
         throw const FormatException('문제 데이터 형식이 올바르지 않습니다.');
         }
 
-        final generatedQuestions = data['questions'] as List<dynamic>;
+        final generatedQuestions = (data['questions'] as List<dynamic>)
+            .map((item) => item is Map
+                ? {...item, 'difficulty': StudyStorage.normalizeDifficulty(item['difficulty'])}
+                : item)
+            .toList();
 
 if (generatedQuestions.isEmpty) {
   throw const FormatException('생성된 복습 문제가 없습니다.');

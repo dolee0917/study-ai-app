@@ -3,12 +3,13 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'study_history_screen.dart';
-import 'wrong_answer_screen.dart';
+import 'review_selection_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'subject_management_screen.dart';
 import 'study_analysis_screen.dart';
 import 'exam_management_screen.dart';
 import 'exam_date_utils.dart';
+import 'profile_setup_screen.dart';
 import '../services/study_storage.dart';
 
 const _lavender = Color(0xFF8576D8);
@@ -212,10 +213,13 @@ class ExamStatusCardState extends State<ExamStatusCard> with WidgetsBindingObser
 
 /// Pass your existing PDF upload widget through [uploadScreenBuilder].
 class StudyHomeScreen extends StatefulWidget {
-  const StudyHomeScreen({super.key, required this.uploadScreenBuilder, this.userName = '00'});
+  const StudyHomeScreen({super.key, required this.uploadScreenBuilder,
+    required this.userId, this.profileName, this.profile = const {}});
 
   final WidgetBuilder uploadScreenBuilder;
-  final String userName;
+  final String userId;
+  final String? profileName;
+  final Map<String, dynamic> profile;
 
   @override
   State<StudyHomeScreen> createState() => _StudyHomeScreenState();
@@ -283,7 +287,11 @@ class _StudyHomeScreenState extends State<StudyHomeScreen> {
     );
   }
   Widget _myPage() {
-    final user = FirebaseAuth.instance.currentUser;
+    final isCurrentUser = FirebaseAuth.instance.currentUser?.uid == widget.userId;
+    String profileValue(String key) {
+      final value = isCurrentUser ? widget.profile[key] : null;
+      return value is String && value.trim().isNotEmpty ? value.trim() : '정보 없음';
+    }
 
     return ListView(
       padding: const EdgeInsets.all(24),
@@ -314,18 +322,29 @@ class _StudyHomeScreenState extends State<StudyHomeScreen> {
 
         const SizedBox(height: 12),
 
-        Text(
-          user?.email ?? '이메일 정보 없음',
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontSize: 15,
-            color: Color(0xFF66708F),
+        for (final entry in [('학교', 'school'), ('학과', 'major'), ('학년', 'grade')])
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('${entry.$1}: ${profileValue(entry.$2)}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 15, color: Color(0xFF66708F))),
           ),
+
+        const SizedBox(height: 16),
+        ElevatedButton.icon(
+          onPressed: !isCurrentUser ? null : () => Navigator.push(
+            context, MaterialPageRoute<void>(builder: (_) => ProfileSetupScreen(
+              editUserId: widget.userId, initialProfile: widget.profile,
+            )),
+          ),
+          icon: const Icon(Icons.edit_outlined),
+          label: const Text('수정하기'),
+          style: ElevatedButton.styleFrom(foregroundColor: _lavender),
         ),
 
         const SizedBox(height: 40),
 
-        OutlinedButton.icon(
+        TextButton.icon(
           onPressed: () async {
             final shouldLogout = await showDialog<bool>(
               context: context,
@@ -363,8 +382,9 @@ class _StudyHomeScreenState extends State<StudyHomeScreen> {
           },
           icon: const Icon(Icons.logout),
           label: const Text('로그아웃'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: _lavender,
+          style: TextButton.styleFrom(
+            foregroundColor: const Color(0xFF77809B),
+            textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.normal),
             padding: const EdgeInsets.symmetric(vertical: 16),
           ),
         ),
@@ -383,8 +403,13 @@ class _StudyHomeScreenState extends State<StudyHomeScreen> {
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${widget.userName}님, 반갑습니다! 👋',
-                style: const TextStyle(fontSize: 23, fontWeight: FontWeight.bold, color: _ink)),
+            Text(
+              FirebaseAuth.instance.currentUser?.uid == widget.userId &&
+                      (widget.profileName?.trim().isNotEmpty ?? false)
+                  ? '${widget.profileName!.trim()}님, 반갑습니다! 👋'
+                  : '반갑습니다! 👋',
+              style: const TextStyle(fontSize: 23, fontWeight: FontWeight.bold, color: _ink),
+            ),
             const SizedBox(height: 10),
             Text(_message, style: const TextStyle(fontSize: 15, color: Color(0xFF58628A))),
           ]),
@@ -425,7 +450,7 @@ class _StudyHomeScreenState extends State<StudyHomeScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => const WrongAnswerScreen(),
+                  builder: (_) => const ReviewSelectionScreen(),
                 ),
               ).then((_) => _refreshExamCard());
             },),

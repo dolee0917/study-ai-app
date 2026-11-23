@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class StudyStorage {
+  static const int maxCustomReviewQuestionCount = 20;
   // 테스트에서 Firebase 초기화 없이 계정 격리를 검증하기 위한 조회 지점.
   static String? Function() currentUserId = () =>
       FirebaseAuth.instance.currentUser?.uid;
@@ -12,7 +13,27 @@ class StudyStorage {
   static Future<void> _noteWrites = Future.value();
 
   // 저장된 학습 노트 목록 불러오기
+  static String normalizeDifficulty(dynamic value) =>
+      value == 'easy' || value == 'medium' || value == 'hard'
+          ? value as String
+          : 'unspecified';
+
   static Future<List<Map<String, dynamic>>> loadNotes() async {
+    final notes = await _loadRawNotes();
+    return notes.map((note) {
+      final questions = note['questions'];
+      if (questions is! List) return note;
+      return <String, dynamic>{
+        ...note,
+        'questions': questions.map((question) {
+          if (question is! Map) return question;
+          return {...question, 'difficulty': normalizeDifficulty(question['difficulty'])};
+        }).toList(),
+      };
+    }).toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> _loadRawNotes() async {
     final prefs = await SharedPreferences.getInstance();
     final savedData = prefs.getString(_storageKey);
 
@@ -44,7 +65,7 @@ class StudyStorage {
     try {
     final prefs = await SharedPreferences.getInstance();
 
-    final notes = await loadNotes();
+    final notes = await _loadRawNotes();
 
     final id = noteId ?? DateTime.now().microsecondsSinceEpoch.toString();
     final index = notes.indexWhere((note) => note['id'] == id);
@@ -461,22 +482,30 @@ class StudyStorage {
     required String semesterCode,
     required String subjectId,
     required int limit,
+    String? difficulty,
   }) => _getRecommendedReviewQuestions(
     semesterCode: semesterCode, subjectId: subjectId, limit: limit,
+    difficulty: difficulty,
   );
 
   static Future<int> getRecommendedReviewQuestionCount({
     required String semesterCode,
     required String subjectId,
+    String? difficulty,
   }) async => (await _getRecommendedReviewQuestions(
-    semesterCode: semesterCode, subjectId: subjectId,
+    semesterCode: semesterCode, subjectId: subjectId, difficulty: difficulty,
   )).length;
 
   static Future<List<Map<String, dynamic>>> _getRecommendedReviewQuestions({
     required String semesterCode,
     required String subjectId,
     int? limit,
+    String? difficulty,
   }) async {
+    if (difficulty != null && difficulty != 'all' &&
+        difficulty != 'easy' && difficulty != 'medium' && difficulty != 'hard') {
+      throw ArgumentError.value(difficulty, 'difficulty');
+    }
     if (limit != null && limit <= 0) return [];
     final notes = await loadNotes();
     final candidates = <String, Map<String, dynamic>>{};
@@ -517,6 +546,7 @@ class StudyStorage {
           'options': List<dynamic>.from(options),
           'correctAnswer': correct,
           'explanation': item['explanation'] is String ? item['explanation'] : '',
+          'difficulty': normalizeDifficulty(item['difficulty']),
           'fileName': fileName,
           'semesterCode': semesterCode,
           'subjectId': subjectId,
@@ -529,7 +559,9 @@ class StudyStorage {
     final histories = <String, Map<String, dynamic>>{
       for (final item in await getQuestionAnalysis()) _key(item): item,
     };
-    final ranked = candidates.entries.toList();
+    final ranked = candidates.entries.where((entry) =>
+        difficulty == null || difficulty == 'all' ||
+        entry.value['difficulty'] == difficulty).toList();
     Map<String, dynamic>? history(Map<String, dynamic> candidate) {
       final key = _key(candidate);
       // 같은 이력 키에 서로 다른 후보가 있으면 이력을 임의 연결하지 않는다.

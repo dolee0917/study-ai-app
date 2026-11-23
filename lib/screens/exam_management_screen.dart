@@ -78,12 +78,18 @@ class ExamReviewSummary extends StatefulWidget {
     required this.availableCount,
     required this.daysUntilExam,
     required this.onStart,
+    this.countForDifficulty,
+    this.questionsForSettings,
+    this.onStartCustom,
   });
 
   final Future<Map<String, dynamic>> weakStats;
   final Future<int> availableCount;
   final int? daysUntilExam;
   final Future<void> Function(int) onStart;
+  final Future<int> Function(String)? countForDifficulty;
+  final Future<List<Map<String, dynamic>>> Function(String, int)? questionsForSettings;
+  final Future<void> Function(List<Map<String, dynamic>>)? onStartCustom;
 
   @override
   State<ExamReviewSummary> createState() => _ExamReviewSummaryState();
@@ -152,7 +158,21 @@ class _ExamReviewSummaryState extends State<ExamReviewSummary> {
                   onPressed: count == 0 || _starting ? null : () async {
                     setState(() => _starting = true);
                     try {
-                      await widget.onStart(available!);
+                       final selection = await showDialog<ReviewSettingsResult>(
+                         context: context,
+                         builder: (_) => ReviewSettingsDialog(
+                           initialCount: count,
+                           countForDifficulty: widget.countForDifficulty ?? ((_) async => available!),
+                            questionsForSettings: widget.questionsForSettings,
+                         ),
+                       );
+                       if (selection != null && mounted) {
+                         if (selection.automatic) {
+                           await widget.onStart(available!);
+                         } else if (selection.questions != null) {
+                           await widget.onStartCustom?.call(selection.questions!);
+                         }
+                       }
                     } finally {
                       if (mounted) setState(() => _starting = false);
                     }
@@ -166,6 +186,142 @@ class _ExamReviewSummaryState extends State<ExamReviewSummary> {
       ],
     );
   }
+}
+
+class ReviewSettingsResult {
+  const ReviewSettingsResult.automatic() : automatic = true, questions = null;
+  const ReviewSettingsResult.custom(this.questions) : automatic = false;
+  final bool automatic;
+  final List<Map<String, dynamic>>? questions;
+}
+
+class ReviewSettingsDialog extends StatefulWidget {
+  const ReviewSettingsDialog({super.key, required this.initialCount,
+    required this.countForDifficulty, this.questionsForSettings});
+
+  final int initialCount;
+  final Future<int> Function(String) countForDifficulty;
+  final Future<List<Map<String, dynamic>>> Function(String, int)? questionsForSettings;
+
+  @override
+  State<ReviewSettingsDialog> createState() => _ReviewSettingsDialogState();
+}
+
+class _ReviewSettingsDialogState extends State<ReviewSettingsDialog> {
+  String _difficulty = 'all';
+  late int _count;
+  late Future<int> _available;
+  bool _starting = false;
+  String? _startError;
+
+  @override
+  void initState() {
+    super.initState();
+    _count = widget.initialCount.clamp(1, StudyStorage.maxCustomReviewQuestionCount).toInt();
+    _loadCount();
+  }
+
+  void _loadCount() {
+    _available = Future.sync(() => widget.countForDifficulty(_difficulty));
+  }
+
+  Future<void> _startCustom() async {
+    if (_starting || widget.questionsForSettings == null) return;
+    setState(() { _starting = true; _startError = null; });
+    try {
+      final questions = await widget.questionsForSettings!(_difficulty, _count);
+      if (!mounted) return;
+      if (questions.isEmpty) {
+        setState(() { _startError = '복습 가능한 문제가 없습니다. 조건을 변경해 주세요.'; _loadCount(); });
+        return;
+      }
+      if (questions.length < _count) {
+        final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+          title: const Text('복습 문제 수 확인'),
+          content: Text('요청한 $_count문제 중 현재 ${questions.length}문제를 풀 수 있습니다. 이 문제들로 시작할까요?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('조건 변경')),
+            ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('시작하기')),
+          ],
+        ));
+        if (!mounted || confirmed != true) return;
+      }
+      if (mounted) Navigator.pop(context, ReviewSettingsResult.custom(questions));
+    } catch (_) {
+      if (mounted) setState(() => _startError = '추천 문제를 불러오지 못했습니다. 다시 시도해 주세요.');
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('맞춤 복습 설정'),
+    content: SingleChildScrollView(child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          initialValue: _difficulty,
+          decoration: const InputDecoration(labelText: '난이도'),
+          items: const [
+            DropdownMenuItem(value: 'all', child: Text('전체')),
+            DropdownMenuItem(value: 'easy', child: Text('쉬움')),
+            DropdownMenuItem(value: 'medium', child: Text('보통')),
+            DropdownMenuItem(value: 'hard', child: Text('어려움')),
+          ],
+          onChanged: _starting ? null : (value) {
+            if (value == null || value == _difficulty) return;
+            setState(() { _difficulty = value; _loadCount(); });
+          },
+        ),
+        const SizedBox(height: 16),
+        DropdownButtonFormField<int>(
+          initialValue: _count,
+          decoration: const InputDecoration(labelText: '문제 개수'),
+          items: List.generate(StudyStorage.maxCustomReviewQuestionCount,
+            (index) => DropdownMenuItem(value: index + 1, child: Text('${index + 1}개'))),
+          onChanged: _starting ? null : (value) { if (value != null) setState(() => _count = value); },
+        ),
+        const SizedBox(height: 16),
+        FutureBuilder<int>(
+          key: ObjectKey(_available), future: _available,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Text('추천 가능 문제를 확인하는 중...');
+            }
+            if (snapshot.hasError || !snapshot.hasData) {
+              return const Text('추천 가능 문제 수를 불러오지 못했습니다.');
+            }
+            final available = snapshot.data!;
+            if (available == 0) return const Text('선택한 난이도에 복습 가능한 문제가 없습니다.');
+            if (available < _count) {
+              return Text('추천 가능: $available문제 · 요청한 $_count문제보다 부족합니다.');
+            }
+            return Text('추천 가능: $available문제');
+          },
+        ),
+        if (_startError != null) ...[
+          const SizedBox(height: 12),
+          Text(_startError!, style: const TextStyle(color: Colors.red)),
+        ],
+      ],
+    )),
+    actions: [
+      TextButton(onPressed: _starting ? null : () => Navigator.pop(context), child: const Text('닫기')),
+      ElevatedButton(onPressed: _starting ? null : () => Navigator.pop(context, const ReviewSettingsResult.automatic()),
+        child: const Text('기존 추천 복습 시작')),
+      FutureBuilder<int>(
+        key: ObjectKey(_available), future: _available,
+        builder: (context, snapshot) => ElevatedButton(
+          onPressed: _starting || widget.questionsForSettings == null ||
+              snapshot.connectionState != ConnectionState.done || snapshot.hasError ||
+              (snapshot.data ?? 0) <= 0 ? null : _startCustom,
+          child: Text(_starting ? '문제 확인 중...' : '맞춤 복습 시작'),
+        ),
+      ),
+    ],
+  );
 }
 
 class _ExamManagementScreenState extends State<ExamManagementScreen> {
@@ -748,6 +904,36 @@ class _ExamManagementScreenState extends State<ExamManagementScreen> {
                                       weakStats: weakStats,
                                       availableCount: reviewCount,
                                       daysUntilExam: daysUntilExam,
+                                      countForDifficulty: (difficulty) =>
+                                          StudyStorage.getRecommendedReviewQuestionCount(
+                                            semesterCode: semesterCode,
+                                            subjectId: subjectId,
+                                            difficulty: difficulty,
+                                          ),
+                                      questionsForSettings: (String difficulty, int count) =>
+                                          StudyStorage.getRecommendedReviewQuestions(
+                                            semesterCode: semesterCode, subjectId: subjectId,
+                                            difficulty: difficulty, limit: count,
+                                          ),
+                                      onStartCustom: (questions) async {
+                                        final currentDays = _daysUntilExam(examDate);
+                                        if (currentDays == null || currentDays < 0) {
+                                          setState(() {});
+                                          return;
+                                        }
+                                        await Navigator.of(context).push(MaterialPageRoute<void>(
+                                          builder: (_) => RecommendedReviewScreen(
+                                            semesterCode: semesterCode, subjectId: subjectId,
+                                            count: questions.length, questions: questions,
+                                          ),
+                                        ));
+                                        if (!mounted) return;
+                                        setState(() {
+                                          final key = '${user.uid}/$semesterCode/$subjectId';
+                                          _weakStats.remove(key);
+                                          _reviewCounts.remove(key);
+                                        });
+                                      },
                                       onStart: (available) async {
                                         final currentDays = _daysUntilExam(examDate);
                                         if (currentDays == null || currentDays < 0) {

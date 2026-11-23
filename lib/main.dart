@@ -54,6 +54,7 @@ class StudyAiApp extends StatelessWidget {
           final user = snapshot.data!;
 
           return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            key: ValueKey(user.uid),
             stream: FirebaseFirestore.instance
                 .collection('users')
                 .doc(user.uid)
@@ -78,6 +79,10 @@ class StudyAiApp extends StatelessWidget {
 
               if (profile?['profileCompleted'] == true) {
                 return StudyHomeScreen(
+                  key: ValueKey(user.uid),
+                  userId: user.uid,
+                  profileName: profile?['name'] is String ? profile!['name'] as String : null,
+                  profile: profile ?? const {},
                   uploadScreenBuilder: (context) => const PdfUploadPage(),
                 );
               }

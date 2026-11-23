@@ -9,6 +9,7 @@ void main() {
     {'type': 'multiple_choice', 'question': '문제', 'options': ['가', '나'],
       'answer': '가', 'explanation': '해설'},
   ];
+  final normalizedQuestions = questions.map((q) => {...q, 'difficulty': 'unspecified'}).toList();
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -26,8 +27,8 @@ void main() {
     await save('second', items: questions);
     var notes = await StudyStorage.loadNotes();
     expect(notes.length, 2);
-    expect(notes.firstWhere((n) => n['id'] == 'first')['questions'], questions);
-    expect(notes.firstWhere((n) => n['id'] == 'second')['questions'], questions);
+    expect(notes.firstWhere((n) => n['id'] == 'first')['questions'], normalizedQuestions);
+    expect(notes.firstWhere((n) => n['id'] == 'second')['questions'], normalizedQuestions);
     await save('second', items: questions);
     notes = await StudyStorage.loadNotes();
     expect(notes.length, 2);
@@ -41,7 +42,7 @@ void main() {
     await save('e');
     final notes = await StudyStorage.loadNotes();
     expect(notes.length, 5);
-    expect(notes.firstWhere((n) => n['id'] == 'a')['questions'], questions);
+    expect(notes.firstWhere((n) => n['id'] == 'a')['questions'], normalizedQuestions);
     expect(notes.where((n) => n['id'] != 'a').every((n) => (n['questions'] as List).isEmpty), isTrue);
     await expectLater(save('a', original: '다른 본문'), throwsStateError);
   });
@@ -53,7 +54,7 @@ void main() {
       summaryText: '요약', originalText: '본문', semesterCode: '2026-1', subjectId: 'math');
     expect(await find(), id);
     await save(id, items: questions);
-    expect((await StudyStorage.loadNotes()).single['questions'], questions);
+    expect((await StudyStorage.loadNotes()).single['questions'], normalizedQuestions);
     await save('duplicate');
     await expectLater(find(), throwsStateError);
   });
@@ -73,5 +74,27 @@ void main() {
     await Future.wait([save('one'), save('two'), save('three')]);
     expect((await StudyStorage.loadNotes()).map((note) => note['id']).toSet(),
       {'one', 'two', 'three'});
+  });
+
+  test('난이도를 정규화해 읽고 다른 필드와 기존 저장 원본을 보존한다', () async {
+    final items = [
+      for (final difficulty in ['easy', 'medium', 'hard', 'invalid'])
+        {...questions.single, 'difficulty': difficulty},
+      questions.single,
+    ];
+    await save('a', items: items);
+    final prefs = await SharedPreferences.getInstance();
+    final before = prefs.getString('study_notes');
+    final loaded = (await StudyStorage.loadNotes()).single['questions'] as List;
+    expect(loaded.map((q) => q['difficulty']),
+        ['easy', 'medium', 'hard', 'unspecified', 'unspecified']);
+    for (final question in loaded) {
+      final otherFields = Map<String, dynamic>.from(question)..remove('difficulty');
+      expect(otherFields, questions.single);
+    }
+    expect(prefs.getString('study_notes'), before);
+    await save('b');
+    final raw = jsonDecode(prefs.getString('study_notes')!) as List;
+    expect(raw.firstWhere((n) => n['id'] == 'a')['questions'], items);
   });
 }

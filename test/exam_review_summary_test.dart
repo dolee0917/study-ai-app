@@ -51,7 +51,136 @@ void main() {
     expect(find.text('오늘의 추천 복습: 3문제'), findsOneWidget);
     await tester.tap(find.text('추천 복습 시작하기'));
     await tester.pumpAndSettle();
+    expect(find.text('맞춤 복습 설정'), findsOneWidget);
+    await tester.tap(find.text('기존 추천 복습 시작'));
+    await tester.pumpAndSettle();
     expect(started, 12);
+  });
+
+  testWidgets('설정에서 난이도별 후보와 개수 부족을 표시한다', (tester) async {
+    final requested = <String>[];
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ReviewSettingsDialog(
+      initialCount: 0,
+      countForDifficulty: (difficulty) async {
+        requested.add(difficulty);
+        return {'all': 4, 'easy': 2, 'medium': 1, 'hard': 0}[difficulty]!;
+      },
+    ))));
+    await tester.pumpAndSettle();
+    expect(find.text('1개'), findsOneWidget);
+    expect(find.text('추천 가능: 4문제'), findsOneWidget);
+    for (final entry in [('쉬움', '추천 가능: 2문제'),
+        ('보통', '추천 가능: 1문제'), ('어려움', '선택한 난이도에 복습 가능한 문제가 없습니다.'),
+        ('전체', '추천 가능: 4문제')]) {
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(entry.$1).last);
+      await tester.pumpAndSettle();
+      expect(find.text(entry.$2), findsOneWidget);
+    }
+    expect(requested, ['all', 'easy', 'medium', 'hard', 'all']);
+    await tester.tap(find.byType(DropdownButtonFormField<int>));
+    await tester.pumpAndSettle();
+    expect(find.text('1개'), findsWidgets);
+    await tester.scrollUntilVisible(find.text('20개'), 200,
+      scrollable: find.byType(Scrollable).last);
+    await tester.tap(find.text('20개').last);
+    await tester.pumpAndSettle();
+    expect(find.text('추천 가능: 4문제 · 요청한 20문제보다 부족합니다.'), findsOneWidget);
+  });
+
+  testWidgets('늦게 완료된 이전 조회를 무시하고 로딩과 오류를 표시한다', (tester) async {
+    final old = Completer<int>();
+    final current = Completer<int>();
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ReviewSettingsDialog(
+      initialCount: 30,
+      countForDifficulty: (difficulty) => difficulty == 'all' ? old.future : current.future,
+    ))));
+    await tester.pump();
+    expect(find.text('20개'), findsOneWidget);
+    expect(find.text('추천 가능 문제를 확인하는 중...'), findsOneWidget);
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('쉬움').last);
+    await tester.pump();
+    old.complete(99);
+    await tester.pump();
+    expect(find.text('추천 가능: 99문제'), findsNothing);
+    expect(find.text('추천 가능 문제를 확인하는 중...'), findsOneWidget);
+    current.completeError(Exception('조회 실패'));
+    await tester.pumpAndSettle();
+    expect(find.text('추천 가능 문제 수를 불러오지 못했습니다.'), findsOneWidget);
+  });
+
+  testWidgets('시작 시 다시 조회한 부족 문제를 확인하고 중복 시작을 막는다', (tester) async {
+    final fetch = Completer<List<Map<String, dynamic>>>();
+    var calls = 0;
+    List<Map<String, dynamic>>? started;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExamReviewSummary(
+      weakStats: Future.value(stats), availableCount: Future.value(15), daysUntilExam: 1,
+      countForDifficulty: (_) async => 15,
+      questionsForSettings: (difficulty, count) {
+        expect(difficulty, 'all');
+        expect(count, 10);
+        calls++;
+        return fetch.future;
+      },
+      onStart: (_) async {}, onStartCustom: (questions) async { started = questions; },
+    ))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('추천 복습 시작하기'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('맞춤 복습 시작'));
+    await tester.pump();
+    expect(find.text('문제 확인 중...'), findsOneWidget);
+    expect(tester.widget<ElevatedButton>(find.widgetWithText(ElevatedButton, '문제 확인 중...')).onPressed, isNull);
+    expect(calls, 1);
+    fetch.complete(List.generate(8, (i) => {'question': 'Q$i'}));
+    await tester.pumpAndSettle();
+    expect(find.text('요청한 10문제 중 현재 8문제를 풀 수 있습니다. 이 문제들로 시작할까요?'), findsOneWidget);
+    expect(started, isNull);
+    await tester.tap(find.text('시작하기'));
+    await tester.pumpAndSettle();
+    expect(started!.length, 8);
+  });
+
+  testWidgets('시작 직전 후보가 없어지면 복습하지 않고 안내한다', (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ReviewSettingsDialog(
+      initialCount: 2, countForDifficulty: (_) async => calls == 0 ? 2 : 0,
+      questionsForSettings: (_, _) async { calls++; return []; },
+    ))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('맞춤 복습 시작'));
+    await tester.pumpAndSettle();
+    expect(find.text('복습 가능한 문제가 없습니다. 조건을 변경해 주세요.'), findsOneWidget);
+    expect(tester.widget<ElevatedButton>(find.widgetWithText(ElevatedButton, '맞춤 복습 시작')).onPressed, isNull);
+  });
+
+  testWidgets('선택한 난이도와 요청 개수를 실제 조회에 전달한다', (tester) async {
+    String? selectedDifficulty;
+    int? selectedCount;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExamReviewSummary(
+      weakStats: Future.value(stats), availableCount: Future.value(10), daysUntilExam: 2,
+      countForDifficulty: (_) async => 10,
+      questionsForSettings: (difficulty, count) async {
+        selectedDifficulty = difficulty;
+        selectedCount = count;
+        return List.generate(count, (i) => {'question': 'Q$i'});
+      },
+      onStart: (_) async {}, onStartCustom: (_) async {},
+    ))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('추천 복습 시작하기'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('쉬움').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('맞춤 복습 시작'));
+    await tester.pumpAndSettle();
+    expect(selectedDifficulty, 'easy');
+    expect(selectedCount, 5);
   });
 
   testWidgets('후보 없음, 종료 및 잘못된 날짜에서 시작 버튼이 비활성화된다', (tester) async {

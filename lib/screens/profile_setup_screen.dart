@@ -3,7 +3,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
-  const ProfileSetupScreen({super.key});
+  const ProfileSetupScreen({super.key, this.editUserId, this.initialProfile});
+
+  final String? editUserId;
+  final Map<String, dynamic>? initialProfile;
 
   @override
   State<ProfileSetupScreen> createState() =>
@@ -21,10 +24,28 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   
   bool isSaving = false;
 
+  @override
+  void initState() {
+    super.initState();
+    final profile = widget.initialProfile;
+    if (widget.editUserId == null || profile == null) return;
+    nameController.text = profile['name'] is String ? profile['name'] as String : '';
+    schoolController.text = profile['school'] is String ? profile['school'] as String : '';
+    majorController.text = profile['major'] is String ? profile['major'] as String : '';
+    if (['1학년', '2학년', '3학년', '4학년', '5학년 이상'].contains(profile['grade'])) {
+      selectedGrade = profile['grade'] as String;
+    }
+    if (['1학기', '2학기'].contains(profile['semester'])) {
+      selectedSemester = profile['semester'] as String;
+    }
+    if (profile['purpose'] == '시험 대비') selectedPurpose = '시험 대비';
+  }
+
 Future<void> saveProfile() async {
+  if (isSaving) return;
   final user = FirebaseAuth.instance.currentUser;
 
-  if (user == null) {
+  if (user == null || (widget.editUserId != null && user.uid != widget.editUserId)) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('로그인 정보가 없습니다. 다시 로그인해주세요.')),
     );
@@ -45,21 +66,31 @@ Future<void> saveProfile() async {
   setState(() => isSaving = true);
 
   try {
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .set({
+    final ref = FirebaseFirestore.instance.collection('users').doc(user.uid);
+    final fields = {
           'name': name,
           'school': school,
           'major': major,
           'grade': selectedGrade,
           'semester': selectedSemester,
           'purpose': selectedPurpose,
+    };
+    if (widget.editUserId != null) {
+      await ref.update(fields);
+    } else {
+      await ref.set({
+          ...fields,
           'profileCompleted': true,
           'createdAt': FieldValue.serverTimestamp(),
         });
+    }
 
     if (!mounted) return;
+
+    if (widget.editUserId != null) {
+      Navigator.pop(context);
+      return;
+    }
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('학습 프로필이 저장되었습니다!')),
@@ -97,7 +128,7 @@ Future<void> saveProfile() async {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F7FF),
       appBar: AppBar(
-        title: const Text('학습 프로필 설정'),
+        title: Text(widget.editUserId == null ? '학습 프로필 설정' : '프로필 수정'),
         backgroundColor: const Color(0xFFF8F7FF),
       ),
       body: SafeArea(
@@ -115,10 +146,10 @@ Future<void> saveProfile() async {
 
                 const SizedBox(height: 16),
 
-                const Text(
-                  '학습 정보를 등록해주세요',
+                Text(
+                  widget.editUserId == null ? '학습 정보를 등록해주세요' : '학습 정보를 수정해주세요',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
                   ),
@@ -241,9 +272,9 @@ Future<void> saveProfile() async {
                       backgroundColor: const Color(0xFF9185E8),
                       foregroundColor: Colors.white,
                     ),
-                    child: const Text(
-                      '학습 시작하기',
-                      style: TextStyle(fontSize: 17),
+                    child: Text(
+                      widget.editUserId == null ? '학습 시작하기' : '저장하기',
+                      style: const TextStyle(fontSize: 17),
                     ),
                   ),
                 ),

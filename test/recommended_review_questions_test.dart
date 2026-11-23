@@ -25,9 +25,9 @@ void main() {
   Future<void> retry(String text, bool correct) => StudyStorage.saveRetryResult(
     question: text, userAnswer: 'A', correctAnswer: 'A', isCorrect: correct,
     fileName: 'book.pdf', semesterCode: '2026-1', subjectId: 'math');
-  Future<List<Map<String, dynamic>>> recommend({int limit = 20}) =>
+  Future<List<Map<String, dynamic>>> recommend({int limit = 20, String? difficulty}) =>
       StudyStorage.getRecommendedReviewQuestions(
-        semesterCode: '2026-1', subjectId: 'math', limit: limit);
+        semesterCode: '2026-1', subjectId: 'math', limit: limit, difficulty: difficulty);
 
   final originalUser = StudyStorage.currentUserId;
   setUp(() {
@@ -36,9 +36,67 @@ void main() {
   });
   tearDown(() => StudyStorage.currentUserId = originalUser);
 
+  test('난이도별 후보와 개수는 동일한 유효성 및 중복 기준을 사용한다', () async {
+    final easy = {...question('easy'), 'difficulty': 'easy'};
+    await seed([
+      note('a', [easy, easy, {...question('medium'), 'difficulty': 'medium'},
+        {...question('hard'), 'difficulty': 'hard'}, question('old'),
+        {...question('invalid difficulty'), 'difficulty': 'unknown'},
+        {...question('invalid answer'), 'difficulty': 'easy', 'answer': 'C'},
+        {'type': 'short_answer', 'question': 'short', 'difficulty': 'easy'}]),
+      note('b', [easy]),
+      note('other', [{...question('other'), 'difficulty': 'easy'}], subject: 'science'),
+    ]);
+    final all = await recommend(limit: 100);
+    expect(all.length, 5);
+    expect(all.where((q) => q['difficulty'] == 'unspecified').length, 2);
+    expect(await recommend(limit: 100, difficulty: 'all'), all);
+    for (final difficulty in ['easy', 'medium', 'hard']) {
+      final result = await recommend(limit: 100, difficulty: difficulty);
+      final count = await StudyStorage.getRecommendedReviewQuestionCount(
+        semesterCode: '2026-1', subjectId: 'math', difficulty: difficulty);
+      expect(result.length, count);
+      expect(count, 1);
+      expect(result.single['difficulty'], difficulty);
+    }
+    expect(await StudyStorage.getRecommendedReviewQuestionCount(
+      semesterCode: '2026-1', subjectId: 'math'), all.length);
+    expect(StudyStorage.maxCustomReviewQuestionCount, 20);
+  });
+
+  test('난이도 필터 안에서도 우선순위와 연속 정답 해제 규칙을 유지한다', () async {
+    await seed([note('one', [
+      for (final text in ['unseen', 'weak', 'correct', 'resolved'])
+        {...question(text), 'difficulty': 'easy'},
+    ])]);
+    await attempt('weak', false);
+    await attempt('correct', true);
+    await attempt('resolved', false);
+    await retry('resolved', true);
+    await retry('resolved', true);
+    expect((await recommend(difficulty: 'easy')).map((q) => q['question']),
+      ['unseen', 'weak', 'correct', 'resolved']);
+    expect(await StudyStorage.getQuestionLearningStatus(
+      question: 'resolved', subjectId: 'math', semesterCode: '2026-1', fileName: 'book.pdf'),
+      '해제');
+  });
+
+  test('난이도 충돌 중복은 기존 대표 후보 기준으로 필터링한다', () async {
+    await seed([
+      note('a', [{...question('same'), 'difficulty': 'easy'}]),
+      note('b', [{...question('same'), 'difficulty': 'hard'}]),
+    ]);
+    expect((await recommend(difficulty: 'easy')).length, 1);
+    expect(await recommend(difficulty: 'hard'), isEmpty);
+    await expectLater(recommend(difficulty: 'unknown'), throwsArgumentError);
+  });
+
   test('미풀이, 미해소, 정답, 해제 순이며 푼 문제도 반복 추천한다', () async {
-    await seed([note('one', [question('correct'), question('resolved'),
-      question('weak'), question('unseen')])]);
+    await seed([note('one', [
+      {...question('correct'), 'difficulty': 'easy'},
+      {...question('resolved'), 'difficulty': 'hard'},
+      {...question('weak'), 'difficulty': 'medium'}, question('unseen'),
+    ])]);
     await attempt('correct', true);
     await attempt('weak', false);
     await attempt('resolved', false);
@@ -47,6 +105,9 @@ void main() {
     await attempt('not-in-note', false);
     final result = await recommend();
     expect(result.map((q) => q['question']), ['unseen', 'weak', 'correct', 'resolved']);
+    expect(await StudyStorage.getQuestionLearningStatus(
+      question: 'resolved', subjectId: 'math', semesterCode: '2026-1', fileName: 'book.pdf'),
+      '해제');
     expect((await recommend(limit: 2)).map((q) => q['question']), ['unseen', 'weak']);
     expect(await recommend(limit: 0), isEmpty);
     expect(await recommend(limit: -1), isEmpty);
@@ -76,7 +137,7 @@ void main() {
       expect(q['explanation'], '설명');
     }
     final notes = await StudyStorage.loadNotes();
-    expect((notes.first['questions'] as List).first, source);
+    expect((notes.first['questions'] as List).first, {...source, 'difficulty': 'unspecified'});
   });
 
   test('서로 다른 노트의 동일 후보는 중복 제거하고 이력을 유지한다', () async {

@@ -9,11 +9,13 @@ class RecommendedReviewScreen extends StatefulWidget {
     required this.semesterCode,
     required this.subjectId,
     required this.count,
+    this.questions,
   });
 
   final String semesterCode;
   final String subjectId;
   final int count;
+  final List<Map<String, dynamic>>? questions;
 
   @override
   State<RecommendedReviewScreen> createState() => _RecommendedReviewScreenState();
@@ -28,7 +30,7 @@ class _RecommendedReviewScreenState extends State<RecommendedReviewScreen> {
   @override
   void initState() {
     super.initState();
-    _questions = StudyStorage.getRecommendedReviewQuestions(
+    _questions = widget.questions != null ? Future.value(widget.questions!) : StudyStorage.getRecommendedReviewQuestions(
       semesterCode: widget.semesterCode,
       subjectId: widget.subjectId,
       limit: widget.count,
