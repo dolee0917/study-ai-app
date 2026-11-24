@@ -4,17 +4,43 @@ import time
 import json
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import errors
+if __package__:
+    from .firebase_auth import FirebaseAuthError, firebase_auth_error_handler, require_firebase_user
+    from .rate_limiter import RateLimiter, RateLimitExceeded
+else:
+    from firebase_auth import FirebaseAuthError, firebase_auth_error_handler, require_firebase_user
+    from rate_limiter import RateLimiter, RateLimitExceeded
 
 load_dotenv()
 
 api_key = os.getenv("GEMINI_API_KEY")
 
 app = FastAPI()
+app.add_exception_handler(FirebaseAuthError, firebase_auth_error_handler)
+rate_limiter = RateLimiter.from_env()
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_error_handler(request, exc):
+    return JSONResponse(status_code=429,
+                        content={"detail": "요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.",
+                                 "code": "USER_RATE_LIMIT"},
+                        headers={"Retry-After": str(exc.retry_after)})
+
+
+def limit_summary(uid: str = Depends(require_firebase_user)):
+    rate_limiter.check_and_record(uid, "summary")
+    return uid
+
+
+def limit_quiz(uid: str = Depends(require_firebase_user)):
+    rate_limiter.check_and_record(uid, "quiz")
+    return uid
 
 AI_ERRORS = {
     "AI_UNAVAILABLE": (503, "AI 서버에 요청이 집중되고 있습니다. 잠시 후 다시 시도해주세요."),
@@ -96,7 +122,7 @@ def home():
 
 
 @app.post("/summarize")
-def summarize(request: SummaryRequest):
+def summarize(request: SummaryRequest, uid: str = Depends(limit_summary)):
     if not api_key:
         raise AIError("AI_CONFIG_ERROR", "summary")
 
@@ -164,7 +190,7 @@ def summarize(request: SummaryRequest):
         
 
 @app.post("/generate-quiz")
-def generate_quiz(request: QuizRequest):
+def generate_quiz(request: QuizRequest, uid: str = Depends(limit_quiz)):
     if not api_key:
         raise AIError("AI_CONFIG_ERROR", "quiz")
 

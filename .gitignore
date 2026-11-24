@@ -64,6 +64,7 @@ backend/__pycache__/
 .pytest_cache/
 
 # Private credentials
+backend/credentials/
 *service-account*.json
 *serviceAccountKey*.json
 *.pem

@@ -7,11 +7,18 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from google.genai import errors
 
-from backend.main import QuizRequest, SummaryRequest, app, generate_quiz, summarize
+from backend.main import QuizRequest, SummaryRequest, app, generate_quiz, summarize, require_firebase_user
+from backend.rate_limiter import RateLimiter
 
 
 class AIErrorTest(unittest.TestCase):
     def setUp(self):
+        limiter = patch('backend.main.rate_limiter', RateLimiter())
+        limiter.start()
+        self.addCleanup(limiter.stop)
+        overrides = patch.dict(app.dependency_overrides, {require_firebase_user: lambda: 'test-user'})
+        overrides.start()
+        self.addCleanup(overrides.stop)
         self.key = patch('backend.main.api_key', 'mock-key')
         self.client = patch('backend.main.genai.Client')
         self.sleep = patch('backend.main.time.sleep')
