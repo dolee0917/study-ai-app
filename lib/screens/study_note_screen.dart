@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'quiz_screen.dart';
 import '../services/study_storage.dart';
+import '../services/ai_error.dart';
 
 class StudyNoteScreen extends StatefulWidget {
   final String fileName;
@@ -15,6 +16,8 @@ class StudyNoteScreen extends StatefulWidget {
   // 선택한 과목 및 학기 정보
   final String? subjectId;
   final String? semesterCode;
+  final String? noteId;
+  final String? noteUserId;
 
   const StudyNoteScreen({
     super.key,
@@ -24,6 +27,8 @@ class StudyNoteScreen extends StatefulWidget {
     this.isFromHistory = false,
     this.subjectId,
     this.semesterCode,
+    this.noteId,
+    this.noteUserId,
   });
 
 
@@ -36,11 +41,22 @@ class _StudyNoteScreenState extends State<StudyNoteScreen> {
   List<dynamic> quizQuestions = [];
   bool isSaving = false;
   bool isSaved = false;
-  late String? _noteId = widget.isFromHistory
-      ? null
+  late final String? _screenUserId;
+  late String? _noteId = widget.isFromHistory && widget.noteUserId != null
+      ? widget.noteId
       : '${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
 
+  @override
+  void initState() {
+    super.initState();
+    _screenUserId = StudyStorage.currentUserId();
+  }
+
   Future<String> _saveNote(List<dynamic> questions) async {
+    if (_screenUserId == null || StudyStorage.currentUserId() != _screenUserId ||
+        (widget.noteUserId != null && widget.noteUserId != _screenUserId)) {
+      throw StateError('학습 노트의 사용자를 확인할 수 없습니다.');
+    }
     final id = _noteId ?? await StudyStorage.findExistingNoteId(
       fileName: widget.fileName,
       summaryText: widget.summaryText,
@@ -56,6 +72,7 @@ class _StudyNoteScreenState extends State<StudyNoteScreen> {
       questions: questions,
       subjectId: widget.subjectId,
       semesterCode: widget.semesterCode,
+      expectedUserId: _screenUserId,
     );
     _noteId = savedId;
     return savedId;
@@ -70,6 +87,10 @@ class _StudyNoteScreenState extends State<StudyNoteScreen> {
     });
 
     try {
+        if (_screenUserId == null || StudyStorage.currentUserId() != _screenUserId ||
+            (widget.noteUserId != null && widget.noteUserId != _screenUserId)) {
+          throw StateError('학습 노트의 사용자를 확인할 수 없습니다.');
+        }
         // 실제 Galaxy S24에서 연결되는 PC의 IPv4 주소 사용
         // 아래 주소는 예시이므로 반드시 변경하세요.
         final url = Uri.parse(
@@ -91,10 +112,7 @@ class _StudyNoteScreenState extends State<StudyNoteScreen> {
         ).timeout(const Duration(seconds: 240));
 
         if (response.statusCode != 200) {
-        throw Exception(
-            '서버 오류 (${response.statusCode}): '
-            '${utf8.decode(response.bodyBytes)}',
-        );
+        throw AiHttpException(response.statusCode, utf8.decode(response.bodyBytes, allowMalformed: true));
         }
 
         final data = jsonDecode(
@@ -106,16 +124,12 @@ class _StudyNoteScreenState extends State<StudyNoteScreen> {
         throw const FormatException('문제 데이터 형식이 올바르지 않습니다.');
         }
 
-        final generatedQuestions = (data['questions'] as List<dynamic>)
-            .map((item) => item is Map
-                ? {...item, 'difficulty': StudyStorage.normalizeDifficulty(item['difficulty'])}
-                : item)
-            .toList();
+        final responseQuestions = data['questions'] as List<dynamic>;
 
-if (generatedQuestions.isEmpty) {
+if (responseQuestions.isEmpty) {
   throw const FormatException('생성된 복습 문제가 없습니다.');
 }
-if (generatedQuestions.any((item) =>
+if (responseQuestions.any((item) =>
     item is! Map || item['type'] is! String ||
     item['question'] is! String || (item['question'] as String).trim().isEmpty ||
     item['answer'] is! String || (item['answer'] as String).trim().isEmpty ||
@@ -124,7 +138,14 @@ if (generatedQuestions.any((item) =>
   throw const FormatException('문제 데이터 형식이 올바르지 않습니다.');
 }
 
-await _saveNote(generatedQuestions);
+final generatedQuestions = StudyStorage.prepareGeneratedQuestions(responseQuestions);
+final savedNoteId = await _saveNote(generatedQuestions);
+if (StudyStorage.currentUserId() != _screenUserId) {
+  throw StateError('로그인 사용자가 변경되었습니다.');
+}
+for (final question in generatedQuestions) {
+  question['noteId'] = savedNoteId;
+}
 if (!mounted) return;
 setState(() {
   quizQuestions = generatedQuestions;
@@ -148,7 +169,7 @@ await Navigator.push(
 
         ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text('복습 문제 생성 중 오류가 발생했습니다: $e'),
+            content: Text(aiErrorMessage(e)),
         ),
         );
     } finally {

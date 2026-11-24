@@ -192,4 +192,24 @@ void main() {
     await seed([legacy]);
     expect((await recommend()).single['question'], 'old');
   });
+
+  test('추천 후보는 본인 원본의 신규 필드를 보존하고 다른 사용자 노트는 제외한다', () async {
+    final owned = note('mine', [{...question('mine'), 'questionId': 'q1',
+      'noteId': 'mine', 'concept': '핵심', 'subConcept': null, 'difficulty': 'easy'}])
+      ..['userId'] = 'test-user';
+    final other = note('other', [{...question('foreign'), 'questionId': 'foreign-id',
+      'concept': '다른 사용자 개념', 'difficulty': 'easy'}])..['userId'] = 'other-user';
+    await seed([owned, other, note('legacy', [question('legacy')], file: 'old.pdf')]);
+    final items = await recommend(difficulty: 'easy');
+    expect(items.length, 1);
+    expect(items.single['questionId'], 'q1');
+    expect(items.single['noteId'], 'mine');
+    expect(items.single['concept'], '핵심');
+    expect(items.single.containsKey('subConcept'), isTrue);
+    expect(items.single['subConcept'], isNull);
+    expect((await recommend(limit: 1)).length, 1);
+    final legacy = (await recommend()).firstWhere((q) => q['question'] == 'legacy');
+    expect(legacy.containsKey('questionId'), isFalse);
+    expect(legacy.containsKey('concept'), isFalse);
+  });
 }

@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'screens/study_home_screen.dart';
 import 'screens/study_note_screen.dart';
+import 'services/ai_error.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:firebase_core/firebase_core.dart';
@@ -194,7 +195,6 @@ class _PdfUploadPageState extends State<PdfUploadPage> {
 
   setState(() {
     isSummarizing = true;
-    summaryText = '';
   });
 
     try {
@@ -214,6 +214,10 @@ class _PdfUploadPageState extends State<PdfUploadPage> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
+        if (data is! Map<String, dynamic> || data['summary'] is! String ||
+            (data['summary'] as String).trim().isEmpty) {
+          throw const FormatException('Invalid summary response');
+        }
 
         if (!mounted) return;
 
@@ -238,16 +242,13 @@ class _PdfUploadPageState extends State<PdfUploadPage> {
           ),
         );
       } else {
-        throw Exception(
-          '서버 오류 (${response.statusCode}): '
-          '${utf8.decode(response.bodyBytes)}',
-        );
+        throw AiHttpException(response.statusCode, utf8.decode(response.bodyBytes, allowMalformed: true));
       }
     } catch (e) {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('AI 요약 중 오류가 발생했습니다: $e')),
+        SnackBar(content: Text(aiErrorMessage(e))),
       );
     } finally {
       if (mounted) {

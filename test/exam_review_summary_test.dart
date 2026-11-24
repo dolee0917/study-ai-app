@@ -135,13 +135,20 @@ void main() {
     expect(find.text('문제 확인 중...'), findsOneWidget);
     expect(tester.widget<ElevatedButton>(find.widgetWithText(ElevatedButton, '문제 확인 중...')).onPressed, isNull);
     expect(calls, 1);
-    fetch.complete(List.generate(8, (i) => {'question': 'Q$i'}));
+    fetch.complete(List.generate(8, (i) => {'question': 'Q$i',
+      'questionId': 'id$i', 'noteId': 'note', 'concept': '핵심',
+      'subConcept': '세부', 'difficulty': 'easy'}));
     await tester.pumpAndSettle();
     expect(find.text('요청한 10문제 중 현재 8문제를 풀 수 있습니다. 이 문제들로 시작할까요?'), findsOneWidget);
     expect(started, isNull);
     await tester.tap(find.text('시작하기'));
     await tester.pumpAndSettle();
     expect(started!.length, 8);
+    expect(started!.first['questionId'], 'id0');
+    expect(started!.first['noteId'], 'note');
+    expect(started!.first['concept'], '핵심');
+    expect(started!.first['subConcept'], '세부');
+    expect(started!.first['difficulty'], 'easy');
   });
 
   testWidgets('시작 직전 후보가 없어지면 복습하지 않고 안내한다', (tester) async {

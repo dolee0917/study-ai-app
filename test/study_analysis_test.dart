@@ -201,7 +201,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('분석 카드에 정답률과 해제 상태를 표시', (tester) async {
+  testWidgets('정답률을 표시하고 문제 목록과 해소율을 표시하지 않는다', (tester) async {
     await StudyStorage.saveQuizResult(
       fileName: '자료.pdf',
       subjectId: 'math',
@@ -228,10 +228,66 @@ void main() {
     }
     await tester.pumpWidget(const MaterialApp(home: StudyAnalysisScreen()));
     await tester.pumpAndSettle();
-    expect(find.text('66.7%'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('학습 상태: 해제'), 300);
-    expect(find.text('복습이 필요한 문제가 없습니다.'), findsOneWidget);
-    expect(find.text('학습 상태: 해제'), findsOneWidget);
+    final overallChart = find.byKey(const ValueKey('overall_accuracy_chart'));
+    final overallArea = find.ancestor(
+      of: overallChart,
+      matching: find.byWidgetPredicate((widget) =>
+          widget is SizedBox && widget.width == 118 && widget.height == 118),
+    );
+    expect(find.descendant(of: overallArea, matching: find.text('66.7%')), findsOneWidget);
+    final chart = tester.widget<CircularProgressIndicator>(
+      overallChart,
+    );
+    expect(chart.value, closeTo(2 / 3, .0001));
+    expect(find.text('3회'), findsOneWidget);
+    expect(find.text('2회'), findsOneWidget);
+    expect(find.text('1회'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('과목별 성취도'), 200);
+    final subjectCard = find.ancestor(
+      of: find.text('정답 2회 · 오답 1회 · 전체 3회'),
+      matching: find.byType(Container),
+    ).first;
+    expect(find.descendant(of: subjectCard, matching: find.text('66.7%')), findsOneWidget);
+    expect(find.text('정답 2회 · 오답 1회 · 전체 3회'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('남은 복습 대상: 0문제'), 200);
+    expect(find.byKey(const ValueKey('status_해제')), findsOneWidget);
+    expect(tester.widget<Text>(find.byKey(const ValueKey('status_해제'))).data, '1문제');
+    for (final status in ['복습 필요', '취약', '개선 중']) {
+      expect(tester.widget<Text>(find.byKey(ValueKey('status_$status'))).data, '0문제');
+    }
+    expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '취약 문제 복습하기 (준비 중)')).onPressed, isNull);
+    expect(find.text('취약 문제 목록'), findsNothing);
+    expect(find.text('문제별 학습 상태'), findsNothing);
+    expect(find.text('학습 상태: 해제'), findsNothing);
+    expect(find.text('복습이 필요한 문제가 없습니다.'), findsNothing);
+    expect(find.text('취약 문제 해소율'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('상태별 고유 문제와 남은 복습 대상을 집계한다', (tester) async {
+    final prefs = await SharedPreferences.getInstance();
+    final records = <Map<String, dynamic>>[];
+    void add(String question, int day, bool correct) {
+      records.add({
+        'id': '$question-$day', 'userId': 'alice', 'fileName': '자료.pdf',
+        'semesterCode': '2026-1', 'subjectId': 'math',
+        'createdAt': '2026-01-0${day}T00:00:00Z',
+        'answers': [{'question': question, 'type': 'multiple_choice', 'isCorrect': correct}],
+      });
+    }
+    add('review', 1, false);
+    add('weak', 1, false); add('weak', 2, false);
+    add('improving', 1, false); add('improving', 2, true);
+    add('resolved', 1, false); add('resolved', 2, true); add('resolved', 3, true);
+    add('normal', 1, true);
+    await prefs.setString('quiz_results', jsonEncode(records));
+    await tester.pumpWidget(const MaterialApp(home: StudyAnalysisScreen()));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('남은 복습 대상: 3문제'), 200);
+    for (final status in ['복습 필요', '취약', '개선 중', '해제']) {
+      expect(tester.widget<Text>(find.byKey(ValueKey('status_$status'))).data, '1문제');
+    }
+    expect(find.text('남은 복습 대상: 3문제'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -241,6 +297,58 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: StudyAnalysisScreen()));
     await tester.pumpAndSettle();
     expect(find.text('학습 데이터를 불러오지 못했습니다.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('학기와 과목 조합에 따라 통계와 문제 상태를 필터링한다', (tester) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('quiz_results', jsonEncode([
+      {'userId': 'alice', 'id': 'a', 'fileName': 'a.pdf',
+        'semesterCode': '2025-1', 'subjectId': 'math', 'createdAt': '2025-01-01',
+        'answers': [{'question': 'A', 'type': 'multiple_choice', 'isCorrect': false}]},
+      {'userId': 'alice', 'id': 'b', 'fileName': 'b.pdf',
+        'semesterCode': '2026-2', 'subjectId': 'math', 'createdAt': '2026-01-01',
+        'answers': [{'question': 'B', 'type': 'multiple_choice', 'isCorrect': true}]},
+      {'userId': 'bob', 'id': 'c', 'fileName': 'c.pdf',
+        'semesterCode': '2024-1', 'subjectId': 'other', 'createdAt': '2024-01-01',
+        'answers': [{'question': 'C', 'type': 'multiple_choice', 'isCorrect': false}]},
+    ]));
+    await tester.pumpWidget(MaterialApp(home: StudyAnalysisScreen(
+      registeredSubjectsLoader: (_) async => [
+        {'semesterCode': '2025-1', 'subjectId': 'math', 'name': '수학'},
+        {'semesterCode': '2026-2', 'subjectId': 'math', 'name': '수학'},
+        {'semesterCode': '2026-2', 'subjectId': 'empty', 'name': '물리'},
+      ],
+    )));
+    await tester.pumpAndSettle();
+    DropdownButton<String> semester() => tester.widget(find.byKey(const ValueKey('semester_filter')));
+    DropdownButton<String> subject() => tester.widget(find.byKey(const ValueKey('subject_filter')));
+    expect(semester().value, '');
+    expect(subject().value, '');
+    expect(tester.widget<CircularProgressIndicator>(find.byKey(const ValueKey('overall_accuracy_chart'))).value, .5);
+    await tester.tap(find.byKey(const ValueKey('subject_filter')));
+    await tester.pumpAndSettle();
+    expect(find.text('수학 (2025학년도 1학기)'), findsWidgets);
+    expect(find.text('수학 (2026학년도 2학기)'), findsWidgets);
+    await tester.tap(find.text('수학 (2025학년도 1학기)').last);
+    await tester.pumpAndSettle();
+    expect(tester.widget<CircularProgressIndicator>(find.byKey(const ValueKey('overall_accuracy_chart'))).value, 0);
+    await tester.scrollUntilVisible(find.text('남은 복습 대상: 1문제'), 200);
+    expect(tester.widget<Text>(find.byKey(const ValueKey('status_복습 필요'))).data, '1문제');
+    semester().onChanged!('2026-2');
+    await tester.pumpAndSettle();
+    expect(subject().value, '');
+    expect(tester.widget<CircularProgressIndicator>(find.byKey(const ValueKey('overall_accuracy_chart'))).value, 1);
+    subject().onChanged!(jsonEncode(['2026-2', 'empty']));
+    await tester.pumpAndSettle();
+    expect(find.text('선택한 범위에 학습 기록이 없습니다.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('semester_filter')), findsOneWidget);
+    expect(find.byKey(const ValueKey('subject_filter')), findsOneWidget);
+    subject().onChanged!('');
+    await tester.pumpAndSettle();
+    semester().onChanged!('');
+    await tester.pumpAndSettle();
+    expect(tester.widget<CircularProgressIndicator>(find.byKey(const ValueKey('overall_accuracy_chart'))).value, .5);
     expect(tester.takeException(), isNull);
   });
 }

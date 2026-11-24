@@ -22,6 +22,7 @@ class QuizScreen extends StatefulWidget {
 }
 
 class _QuizScreenState extends State<QuizScreen> {
+  late final String? _sessionUserId;
   int currentIndex = 0;
   int correctCount = 0;
 
@@ -32,6 +33,12 @@ class _QuizScreenState extends State<QuizScreen> {
 
   bool isAnswered = false;
   bool isCorrect = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _sessionUserId = StudyStorage.currentUserId();
+  }
 
   @override
   void dispose() {
@@ -47,6 +54,7 @@ class _QuizScreenState extends State<QuizScreen> {
     required String explanation,
     required dynamic options,
     required String type,
+    required Map<String, dynamic> source,
   }) {
     answerHistory.add({
       'question': question,
@@ -56,6 +64,8 @@ class _QuizScreenState extends State<QuizScreen> {
       'explanation': explanation,
       'options': options,
       'type': type,
+      for (final key in ['questionId', 'noteId', 'concept', 'subConcept', 'difficulty'])
+        if (source.containsKey(key)) key: source[key],
     });
   }
   
@@ -103,6 +113,7 @@ class _QuizScreenState extends State<QuizScreen> {
       explanation: question['explanation']?.toString() ?? '',
       options: question['options'],
       type: question['type']?.toString() ?? 'short_answer',
+      source: question,
     );
   }
 
@@ -123,12 +134,16 @@ class _QuizScreenState extends State<QuizScreen> {
 
   
   Future<void> saveQuizHistory() async {
+    if (_sessionUserId == null || StudyStorage.currentUserId() != _sessionUserId) {
+      throw StateError('풀이 중 로그인 사용자가 변경되었습니다.');
+    }
     await StudyStorage.saveQuizResult(
       fileName: widget.fileName,
       answers: answerHistory,
       correctCount: correctCount,
       subjectId: widget.subjectId,
       semesterCode: widget.semesterCode,
+      expectedUserId: _sessionUserId,
     );
   }
   

@@ -90,6 +90,8 @@ void initState() {
           isFromHistory: true,
           subjectId: note['subjectId'] as String?,
           semesterCode: note['semesterCode'] as String?,
+          noteId: note['id'] as String?,
+          noteUserId: note['userId'] as String?,
         ),
       ),
     );

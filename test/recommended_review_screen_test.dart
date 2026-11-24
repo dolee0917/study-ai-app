@@ -128,7 +128,8 @@ void main() {
     await prefs.setString('study_notes', jsonEncode([{
       'id': 'note', 'fileName': 'book.pdf', 'semesterCode': '2026-1', 'subjectId': 'math',
       'questions': [{'type': 'multiple_choice', 'question': 'Q', 'options': ['A', 'B'],
-        'answer': 'A', 'difficulty': 'easy'}],
+        'answer': 'A', 'difficulty': 'easy', 'questionId': 'q1', 'noteId': 'note',
+        'concept': '핵심', 'subConcept': '세부'}],
     }]));
     await StudyStorage.saveRetryResult(question: 'Q', userAnswer: 'B', correctAnswer: 'A',
       isCorrect: false, fileName: 'book.pdf', semesterCode: '2026-1', subjectId: 'math');
@@ -146,6 +147,11 @@ void main() {
       semesterCode: '2026-1', subjectId: 'math'), '해제');
     final results = jsonDecode(prefs.getString('quiz_retry_results')!) as List;
     expect(results.first['reviewType'], 'recommended_review');
+    expect(results.first['questionId'], 'q1');
+    expect(results.first['noteId'], 'note');
+    expect(results.first['concept'], '핵심');
+    expect(results.first['subConcept'], '세부');
+    expect(results.first['difficulty'], 'easy');
   });
 
   testWidgets('오답 재풀이는 기존 제목과 안내를 표시한다', (tester) async {
@@ -227,5 +233,62 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('2 / 2'), findsOneWidget);
     expect(find.text('오늘의 추천 복습'), findsOneWidget);
+  });
+
+  for (final recommended in [false, true]) {
+    testWidgets('${recommended ? '추천' : '오답'} 재풀이가 문제 메타데이터를 저장한다', (tester) async {
+      await tester.pumpWidget(MaterialApp(home: WrongAnswerRetryScreen(
+        isRecommendedReview: recommended,
+        question: const {'question': 'Q', 'options': ['A', 'B'], 'correctAnswer': 'A',
+          'questionId': 'q1', 'noteId': 'n1', 'concept': '핵심',
+          'subConcept': null, 'difficulty': 'hard', 'type': 'multiple_choice',
+          'fileName': 'book.pdf', 'semesterCode': '2026-1', 'subjectId': 'math'},
+      )));
+      await tester.tap(find.text('A'));
+      await tester.tap(find.text('정답 확인하기'));
+      await tester.pumpAndSettle();
+      final prefs = await SharedPreferences.getInstance();
+      final record = (jsonDecode(prefs.getString('quiz_retry_results')!) as List).single;
+      expect(record['questionId'], 'q1');
+      expect(record['noteId'], 'n1');
+      expect(record['concept'], '핵심');
+      expect(record.containsKey('subConcept'), isTrue);
+      expect(record['subConcept'], isNull);
+      expect(record['difficulty'], 'hard');
+      expect(record['reviewType'], recommended ? 'recommended_review' : 'wrong_answer_retry');
+      expect(record['userId'], 'test-user');
+      expect(record['semesterCode'], '2026-1');
+      expect(record['subjectId'], 'math');
+    });
+  }
+
+  testWidgets('오답 재풀이 중 계정 변경 시 다른 계정에 저장하지 않는다', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: WrongAnswerRetryScreen(
+      question: {'question': 'Q', 'options': ['A'], 'correctAnswer': 'A', 'questionId': 'q1'},
+    )));
+    StudyStorage.currentUserId = () => 'other-user';
+    await tester.tap(find.text('A'));
+    await tester.tap(find.text('정답 확인하기'));
+    await tester.pumpAndSettle();
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('quiz_retry_results'), isNull);
+    expect(find.text('재풀이 결과를 저장하지 못했습니다.'), findsOneWidget);
+  });
+
+  testWidgets('추천 복습에서 계정 변경 후 다음 문제와 저장을 차단한다', (tester) async {
+    await startReview(tester, 2);
+    await tester.tap(find.text('A'));
+    await tester.tap(find.text('정답 확인하기'));
+    await tester.pumpAndSettle();
+    StudyStorage.currentUserId = () => 'other-user';
+    await tester.ensureVisible(find.text('다음 문제'));
+    await tester.tap(find.text('다음 문제'));
+    await tester.pumpAndSettle();
+    expect(find.text('로그인 사용자가 변경되었습니다. 복습을 다시 시작해주세요.'), findsOneWidget);
+    expect(find.text('Q1'), findsNothing);
+    final prefs = await SharedPreferences.getInstance();
+    final results = jsonDecode(prefs.getString('quiz_retry_results')!) as List;
+    expect(results.length, 1);
+    expect(results.single['userId'], 'test-user');
   });
 }

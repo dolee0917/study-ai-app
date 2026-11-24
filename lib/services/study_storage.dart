@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:math';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -11,6 +12,51 @@ class StudyStorage {
 
   static const String _storageKey = 'study_notes';
   static Future<void> _noteWrites = Future.value();
+
+  static String createQuestionId() {
+    final random = Random.secure();
+    return List.generate(16, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  static String? normalizeConcept(dynamic value) {
+    if (value is! String) return null;
+    final normalized = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  static List<Map<String, dynamic>> prepareGeneratedQuestions(List<dynamic> questions) {
+    final ids = <String>{};
+    return questions.map((item) {
+        final question = Map<String, dynamic>.from(item as Map);
+        String id;
+        do {
+          id = createQuestionId();
+        } while (!ids.add(id));
+        return <String, dynamic>{
+          ...question,
+          'questionId': id,
+          'concept': normalizeConcept(question['concept']),
+          'subConcept': normalizeConcept(question['subConcept']),
+          'difficulty': normalizeDifficulty(question['difficulty']),
+        };
+      }).toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> loadOwnedNotes() async {
+    final uid = currentUserId();
+    if (uid == null) return [];
+    final notes = await loadNotes();
+    if (currentUserId() != uid) throw StateError('로그인 사용자가 변경되었습니다.');
+    return notes.where((note) => note['userId'] == uid).toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> _loadCompatibleNotes() async {
+    final uid = currentUserId();
+    if (uid == null) return [];
+    final notes = await loadNotes();
+    if (currentUserId() != uid) throw StateError('로그인 사용자가 변경되었습니다.');
+    return notes.where((note) => note['userId'] == null || note['userId'] == uid).toList();
+  }
 
   // 저장된 학습 노트 목록 불러오기
   static String normalizeDifficulty(dynamic value) =>
@@ -57,7 +103,12 @@ class StudyStorage {
     String? subjectId,
     String? semesterCode,
     String? noteId,
+    String? expectedUserId,
   }) async {
+    final uid = currentUserId();
+    if (uid == null || (expectedUserId != null && expectedUserId != uid)) {
+      throw StateError('로그인 사용자를 확인할 수 없습니다.');
+    }
     final previous = _noteWrites;
     final completed = Completer<void>();
     _noteWrites = completed.future;
@@ -67,8 +118,13 @@ class StudyStorage {
 
     final notes = await _loadRawNotes();
 
+    if (currentUserId() != uid) throw StateError('로그인 사용자가 변경되었습니다.');
+
     final id = noteId ?? DateTime.now().microsecondsSinceEpoch.toString();
     final index = notes.indexWhere((note) => note['id'] == id);
+    if (index != -1 && notes[index]['userId'] != uid) {
+      throw StateError('다른 사용자 또는 소유자가 없는 학습 노트는 변경할 수 없습니다.');
+    }
     if (index != -1 &&
         (notes[index]['fileName'] != fileName ||
             notes[index]['semesterCode'] != semesterCode ||
@@ -80,10 +136,17 @@ class StudyStorage {
     final newNote = {
       if (index != -1) ...notes[index],
       'id': id,
+      'userId': uid,
       'fileName': fileName,
       'summaryText': summaryText,
       'originalText': originalText,
-      'questions': questions,
+      'questions': questions.map((item) {
+        if (item is Map && item['questionId'] is String &&
+            (item['questionId'] as String).isNotEmpty) {
+          return {...item, 'noteId': id};
+        }
+        return item;
+      }).toList(),
       'subjectId': subjectId,
       'semesterCode': semesterCode,
       'createdAt': index == -1
@@ -97,6 +160,7 @@ class StudyStorage {
       notes[index] = newNote;
     }
 
+    if (currentUserId() != uid) throw StateError('로그인 사용자가 변경되었습니다.');
     final success = await prefs.setString(_storageKey, jsonEncode(notes));
 
     if (!success) {
@@ -115,7 +179,7 @@ class StudyStorage {
     String? subjectId,
     String? semesterCode,
   }) async {
-    final matches = (await loadNotes()).where((note) =>
+    final matches = (await loadOwnedNotes()).where((note) =>
         note['fileName'] == fileName && note['summaryText'] == summaryText &&
         note['originalText'] == originalText && note['subjectId'] == subjectId &&
         note['semesterCode'] == semesterCode).toList();
@@ -134,10 +198,17 @@ class StudyStorage {
     required int correctCount,
     String? subjectId,
     String? semesterCode,
+    String? expectedUserId,
   }) async {
     final uid = currentUserId();
     if (uid == null) throw StateError('로그인이 필요합니다.');
+    if (expectedUserId != null && expectedUserId != uid) {
+      throw StateError('풀이 중 로그인 사용자가 변경되었습니다.');
+    }
     final prefs = await SharedPreferences.getInstance();
+    if (currentUserId() != uid) {
+      throw StateError('풀이 중 로그인 사용자가 변경되었습니다.');
+    }
 
     // 기존 복습 결과 불러오기
     final savedData = prefs.getString('quiz_results');
@@ -164,6 +235,9 @@ class StudyStorage {
     // 최신 결과가 맨 위에 표시되도록 저장
     results.insert(0, newResult);
 
+    if (currentUserId() != uid) {
+      throw StateError('풀이 중 로그인 사용자가 변경되었습니다.');
+    }
     final success = await prefs.setString('quiz_results', jsonEncode(results));
 
     if (!success) {
@@ -184,10 +258,18 @@ class StudyStorage {
     String? semesterCode,
     String? fileName,
     String reviewType = 'wrong_answer_retry',
+    Map<String, dynamic>? questionMetadata,
+    String? expectedUserId,
   }) async {
     final uid = currentUserId();
     if (uid == null) throw StateError('로그인이 필요합니다.');
+    if (expectedUserId != null && expectedUserId != uid) {
+      throw StateError('풀이 중 로그인 사용자가 변경되었습니다.');
+    }
     final prefs = await SharedPreferences.getInstance();
+    if (currentUserId() != uid) {
+      throw StateError('풀이 중 로그인 사용자가 변경되었습니다.');
+    }
 
     const storageKey = 'quiz_retry_results';
 
@@ -209,10 +291,17 @@ class StudyStorage {
       'semesterCode': semesterCode,
       'fileName': fileName,
       'createdAt': DateTime.now().toIso8601String(),
+      for (final key in ['questionId', 'noteId', 'concept', 'subConcept',
+        'difficulty', 'type', 'options', 'explanation'])
+        if (questionMetadata != null && questionMetadata.containsKey(key))
+          key: questionMetadata[key],
     };
 
     results.insert(0, newResult);
 
+    if (currentUserId() != uid) {
+      throw StateError('풀이 중 로그인 사용자가 변경되었습니다.');
+    }
     final success = await prefs.setString(storageKey, jsonEncode(results));
 
     if (!success) {
@@ -246,7 +335,7 @@ class StudyStorage {
   // 이력에는 노트 ID가 없으므로 같은 이력 키의 보기·정답이 다르면 구분할 수 없다.
   static Future<Map<String, Set<String>>> _candidateVariants() async {
     final variants = <String, Set<String>>{};
-    for (final note in await loadNotes()) {
+    for (final note in await _loadCompatibleNotes()) {
       final questions = note['questions'];
       if (questions is! List || note['fileName'] is! String ||
           (note['fileName'] as String).trim().isEmpty) {
@@ -353,6 +442,7 @@ class StudyStorage {
   }
 
   static Future<List<Map<String, dynamic>>> getQuestionAnalysis() async {
+    final uid = currentUserId();
     final groups = <String, List<Map<String, dynamic>>>{};
     final variants = await _candidateVariants();
     for (final a in await _attempts()) {
@@ -366,6 +456,7 @@ class StudyStorage {
       if ((variants[key]?.length ?? 0) > 1) continue;
       groups.putIfAbsent(key, () => []).add(a);
     }
+    if (currentUserId() != uid) throw StateError('로그인 사용자가 변경되었습니다.');
     return groups.entries.where((entry) {
       final g = entry.value;
       final answers = g.map((a) => a['correctAnswer'])
@@ -502,12 +593,13 @@ class StudyStorage {
     int? limit,
     String? difficulty,
   }) async {
+    final uid = currentUserId();
     if (difficulty != null && difficulty != 'all' &&
         difficulty != 'easy' && difficulty != 'medium' && difficulty != 'hard') {
       throw ArgumentError.value(difficulty, 'difficulty');
     }
     if (limit != null && limit <= 0) return [];
-    final notes = await loadNotes();
+    final notes = await _loadCompatibleNotes();
     final candidates = <String, Map<String, dynamic>>{};
     final historyOwners = <String, Set<String>>{};
     final origins = <String, String>{};
@@ -550,7 +642,11 @@ class StudyStorage {
           'fileName': fileName,
           'semesterCode': semesterCode,
           'subjectId': subjectId,
-          if (note['id'] is String) 'noteId': note['id'],
+          if (item.containsKey('questionId')) 'questionId': item['questionId'],
+          if (item.containsKey('noteId')) 'noteId': item['noteId']
+          else if (note['id'] is String) 'noteId': note['id'],
+          if (item.containsKey('concept')) 'concept': item['concept'],
+          if (item.containsKey('subConcept')) 'subConcept': item['subConcept'],
           };
         }
       }
@@ -559,6 +655,7 @@ class StudyStorage {
     final histories = <String, Map<String, dynamic>>{
       for (final item in await getQuestionAnalysis()) _key(item): item,
     };
+    if (currentUserId() != uid) throw StateError('로그인 사용자가 변경되었습니다.');
     final ranked = candidates.entries.where((entry) =>
         difficulty == null || difficulty == 'all' ||
         entry.value['difficulty'] == difficulty).toList();

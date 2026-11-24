@@ -23,6 +23,7 @@ class RecommendedReviewScreen extends StatefulWidget {
 
 class _RecommendedReviewScreenState extends State<RecommendedReviewScreen> {
   late final Future<List<Map<String, dynamic>>> _questions;
+  late final String? _sessionUserId;
   int _index = 0;
   final Map<int, bool> _results = {};
   bool _completed = false;
@@ -30,6 +31,7 @@ class _RecommendedReviewScreenState extends State<RecommendedReviewScreen> {
   @override
   void initState() {
     super.initState();
+    _sessionUserId = StudyStorage.currentUserId();
     _questions = widget.questions != null ? Future.value(widget.questions!) : StudyStorage.getRecommendedReviewQuestions(
       semesterCode: widget.semesterCode,
       subjectId: widget.subjectId,
@@ -42,6 +44,12 @@ class _RecommendedReviewScreenState extends State<RecommendedReviewScreen> {
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: _questions,
       builder: (context, snapshot) {
+        if (_sessionUserId == null || StudyStorage.currentUserId() != _sessionUserId) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('추천 복습')),
+            body: const Center(child: Text('로그인 사용자가 변경되었습니다. 복습을 다시 시작해주세요.')),
+          );
+        }
         if (snapshot.connectionState != ConnectionState.done) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
@@ -105,6 +113,10 @@ class _RecommendedReviewScreenState extends State<RecommendedReviewScreen> {
           totalCount: questions.length,
           onAnswerSaved: (result) => _results.putIfAbsent(currentIndex, () => result),
           onCompleted: () {
+            if (StudyStorage.currentUserId() != _sessionUserId) {
+              setState(() {});
+              return;
+            }
             if (_completed || _index != currentIndex || !_results.containsKey(currentIndex)) return;
             if (_index + 1 == questions.length) {
               setState(() => _completed = true);

@@ -5,13 +5,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_ai_app/services/study_storage.dart';
 
 void main() {
+  final originalUser = StudyStorage.currentUserId;
   const questions = [
     {'type': 'multiple_choice', 'question': '문제', 'options': ['가', '나'],
       'answer': '가', 'explanation': '해설'},
   ];
   final normalizedQuestions = questions.map((q) => {...q, 'difficulty': 'unspecified'}).toList();
 
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    StudyStorage.currentUserId = () => 'alice';
+  });
+  tearDown(() => StudyStorage.currentUserId = originalUser);
 
   Future<String> save(String id, {String subject = 'math',
       String semester = '2026-1', String original = '본문',
@@ -96,5 +101,88 @@ void main() {
     await save('b');
     final raw = jsonDecode(prefs.getString('study_notes')!) as List;
     expect(raw.firstWhere((n) => n['id'] == 'a')['questions'], items);
+  });
+
+  test('신규 문제 ID와 개념을 정규화하고 실제 노트 ID와 함께 보존한다', () async {
+    final source = [
+      {'type': 'multiple_choice', 'question': 'Q', 'answer': 'A', 'options': ['A'],
+        'concept': ' 핵심  개념 ', 'subConcept': ' 세부\t개념 '},
+      {'type': 'short_answer', 'question': 'Q', 'answer': 'A',
+        'concept': 12, 'subConcept': ' 유효 '},
+      {'type': 'short_answer', 'question': 'R', 'answer': 'B', 'subConcept': []},
+    ];
+    final generated = StudyStorage.prepareGeneratedQuestions(source);
+    final regenerated = StudyStorage.prepareGeneratedQuestions(source);
+    final ids = generated.map((q) => q['questionId'] as String).toSet();
+    expect(ids.length, 3);
+    expect(ids.every((id) => id.isNotEmpty), isTrue);
+    expect(ids.intersection(regenerated.map((q) => q['questionId'] as String).toSet()), isEmpty);
+    expect(generated[0]['concept'], '핵심 개념');
+    expect(generated[0]['subConcept'], '세부 개념');
+    expect(generated[1]['concept'], isNull);
+    expect(generated[1]['subConcept'], '유효');
+    expect(generated[2]['concept'], isNull);
+    expect(generated[2]['subConcept'], isNull);
+    final id = await StudyStorage.saveNote(fileName: 'same.pdf', summaryText: '요약',
+      originalText: '본문', semesterCode: '2026-1', subjectId: 'math', questions: generated);
+    final note = (await StudyStorage.loadOwnedNotes()).single;
+    expect(note['id'], id);
+    expect(note['userId'], 'alice');
+    expect(note['semesterCode'], '2026-1');
+    expect(note['subjectId'], 'math');
+    final stored = note['questions'] as List;
+    expect(stored.map((q) => q['questionId']).toSet(), ids);
+    expect(stored.every((q) => q['noteId'] == id), isTrue);
+    expect((await StudyStorage.loadNotes()).single['questions'], stored);
+    await save(id, items: generated);
+    expect((await StudyStorage.loadOwnedNotes()).length, 1);
+  });
+
+  test('소유자 없는 노트와 다른 사용자 노트를 보존하고 본인 노트만 갱신한다', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final legacy = {'id': 'legacy', 'fileName': 'same.pdf', 'summaryText': '요약',
+      'originalText': '본문', 'semesterCode': '2026-1', 'subjectId': 'math',
+      'questions': questions};
+    await prefs.setString('study_notes', jsonEncode([legacy]));
+    await expectLater(save('legacy', items: questions), throwsStateError);
+    await save('alice-note', items: questions);
+    expect((await StudyStorage.loadOwnedNotes()).single['id'], 'alice-note');
+    StudyStorage.currentUserId = () => 'bob';
+    await expectLater(save('alice-note'), throwsStateError);
+    expect(await StudyStorage.loadOwnedNotes(), isEmpty);
+    await save('bob-note');
+    StudyStorage.currentUserId = () => 'alice';
+    await save('alice-note', items: questions);
+    final raw = jsonDecode(prefs.getString('study_notes')!) as List;
+    expect(raw.firstWhere((n) => n['id'] == 'legacy'), legacy);
+    expect(raw.firstWhere((n) => n['id'] == 'bob-note')['userId'], 'bob');
+    expect(raw.where((n) => n['id'] == 'alice-note').length, 1);
+  });
+
+  test('예상 사용자와 로그인 사용자가 다르면 노트와 풀이 이력을 변경하지 않는다', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('quiz_results', '[]');
+    await expectLater(StudyStorage.saveNote(noteId: 'n', fileName: 'same.pdf',
+      summaryText: '요약', originalText: '본문', expectedUserId: 'bob'), throwsStateError);
+    expect(prefs.getString('study_notes'), isNull);
+    expect(prefs.getString('quiz_results'), '[]');
+  });
+
+  test('추천 후보에서 다른 사용자의 노트를 제외하고 무소유 노트는 유지한다', () async {
+    final prefs = await SharedPreferences.getInstance();
+    Map<String, dynamic> note(String id, String text, [String? uid]) => {
+      'id': id, 'userId': ?uid, 'fileName': '$id.pdf',
+      'semesterCode': '2026-1', 'subjectId': 'math',
+      'questions': [{'type': 'multiple_choice', 'question': text,
+        'options': ['A', 'B'], 'answer': 'A'}],
+    };
+    await prefs.setString('study_notes', jsonEncode([
+      note('own', '내 문제', 'alice'), note('other', '다른 문제', 'bob'),
+      note('legacy', '이전 문제'),
+    ]));
+    final candidates = await StudyStorage.getRecommendedReviewQuestions(
+      semesterCode: '2026-1', subjectId: 'math', limit: 10);
+    expect(candidates.map((q) => q['question']).toSet(), {'내 문제', '이전 문제'});
+    expect((await StudyStorage.loadOwnedNotes()).single['id'], 'own');
   });
 }

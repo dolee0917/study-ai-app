@@ -26,10 +26,17 @@ class WrongAnswerRetryScreen extends StatefulWidget {
 
 class _WrongAnswerRetryScreenState
     extends State<WrongAnswerRetryScreen> {
+  late final String? _sessionUserId;
   String? selectedAnswer;
   bool isAnswered = false;
   bool isCorrect = false;
   bool isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _sessionUserId = StudyStorage.currentUserId();
+  }
 
   
   Future<void> checkAnswer() async {
@@ -45,6 +52,9 @@ class _WrongAnswerRetryScreenState
     });
 
     try {
+      if (_sessionUserId == null || StudyStorage.currentUserId() != _sessionUserId) {
+        throw StateError('풀이 중 로그인 사용자가 변경되었습니다.');
+      }
       await StudyStorage.saveRetryResult(
         question: widget.question['question']?.toString() ?? '',
         userAnswer: selectedAnswer!,
@@ -56,6 +66,8 @@ class _WrongAnswerRetryScreenState
         subjectId: widget.question['subjectId']?.toString(),
         semesterCode: widget.question['semesterCode']?.toString(),
         fileName: widget.question['fileName']?.toString(),
+        questionMetadata: widget.question,
+        expectedUserId: _sessionUserId,
       );
       if (!mounted) return;
       setState(() {

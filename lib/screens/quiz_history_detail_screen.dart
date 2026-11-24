@@ -24,6 +24,8 @@ List<Map<String, dynamic>> restoreQuizQuestions(
       'options': options is List ? List<dynamic>.from(options) : [],
       'answer': answer['correctAnswer']?.toString() ?? '',
       'explanation': answer['explanation']?.toString() ?? '',
+      for (final key in ['questionId', 'noteId', 'concept', 'subConcept', 'difficulty'])
+        if (answer.containsKey(key)) key: answer[key],
     };
   }).toList();
 }

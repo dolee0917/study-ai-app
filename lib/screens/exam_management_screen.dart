@@ -910,12 +910,17 @@ class _ExamManagementScreenState extends State<ExamManagementScreen> {
                                             subjectId: subjectId,
                                             difficulty: difficulty,
                                           ),
-                                      questionsForSettings: (String difficulty, int count) =>
-                                          StudyStorage.getRecommendedReviewQuestions(
+                                      questionsForSettings: (String difficulty, int count) async {
+                                        if (StudyStorage.currentUserId() != user.uid) {
+                                          throw StateError('로그인 사용자가 변경되었습니다.');
+                                        }
+                                        return StudyStorage.getRecommendedReviewQuestions(
                                             semesterCode: semesterCode, subjectId: subjectId,
                                             difficulty: difficulty, limit: count,
-                                          ),
+                                          );
+                                      },
                                       onStartCustom: (questions) async {
+                                        if (StudyStorage.currentUserId() != user.uid) return;
                                         final currentDays = _daysUntilExam(examDate);
                                         if (currentDays == null || currentDays < 0) {
                                           setState(() {});
@@ -935,6 +940,7 @@ class _ExamManagementScreenState extends State<ExamManagementScreen> {
                                         });
                                       },
                                       onStart: (available) async {
+                                        if (StudyStorage.currentUserId() != user.uid) return;
                                         final currentDays = _daysUntilExam(examDate);
                                         if (currentDays == null || currentDays < 0) {
                                           setState(() {});
